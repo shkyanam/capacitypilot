@@ -2,6 +2,11 @@
 
 **AI-guided storage planning for capacity teams.**
 
+## Design documentation
+
+- [End-to-end architecture diagrams](docs/architecture.md)
+- [End-to-end system design](docs/end-to-end-design.md)
+
 This application uses FastAPI, a PostgreSQL-backed worker queue, LangGraph, Nebius Token Factory, and Streamlit. It can create audited local planning reservations after explicit planner confirmation. It never provisions physical capacity or sends an external Capacity Manager request.
 
 ## Optional Mem0 memory
