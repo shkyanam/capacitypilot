@@ -8,7 +8,7 @@ work, or send an ad hoc Slack digest remain explicitly controlled and audited.
 flowchart LR
     subgraph sources[Evidence and supply sources]
         history[Storage history and consumption]
-        demand[CIMS demand signals]
+        demand[Demand signals]
         sec[SEC EDGAR filings]
         publisher[Licensed news API optional]
         inventory[Regional capacity inventory]

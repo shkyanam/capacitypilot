@@ -388,7 +388,7 @@ submitting external actions.
 ## 17. Production rollout plan
 
 1. **Data contract** — replace demonstration capacity signals with approved history,
-   consumption, CIMS, and inventory views while preserving source timestamps and
+   consumption, demand, and inventory views while preserving source timestamps and
    classifications.
 2. **Shadow mode** — run recommendations without alerts or write actions; label actual
    expansions and measure precision by forecast window and region.
