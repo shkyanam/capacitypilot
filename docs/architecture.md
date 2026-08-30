@@ -13,6 +13,15 @@ investigation, the recommendation is reviewed by a human, and approved actions c
 Slack, Jira, memory, and evaluation handoffs. The diagrams below provide the detailed technical
 view.
 
+## AI architecture visual overview
+
+![Hand-drawn CapacityPilot AI architecture showing governed PostgreSQL data, LangGraph agents, Nebius reasoning, guardrails, planner actions, Mem0, and evals](images/capacitypilot-ai-architecture.png)
+
+This view separates deterministic agent orchestration from LLM reasoning and human-controlled
+actions. LangGraph coordinates the mandatory specialists, Nebius produces structured output,
+guardrails constrain the recommendation, and planner decisions feed the audited memory and
+evaluation loop. PostgreSQL remains the system of record.
+
 ## Technical system architecture
 
 ```mermaid
