@@ -4,6 +4,17 @@ CapacityPilot is a bounded-autonomous capacity-planning system. Background worke
 and score evidence without planner intervention; actions that reserve capacity, create Jira
 work, or send an ad hoc Slack digest remain explicitly controlled and audited.
 
+## End-to-end visual overview
+
+![Hand-drawn CapacityPilot flow from evidence through autonomous investigation and planner review to governed handoffs](images/capacitypilot-end-to-end.png)
+
+The illustration summarizes the planner journey: governed evidence enters the autonomous
+investigation, the recommendation is reviewed by a human, and approved actions create audited
+Slack, Jira, memory, and evaluation handoffs. The diagrams below provide the detailed technical
+view.
+
+## Technical system architecture
+
 ```mermaid
 flowchart LR
     subgraph sources[Evidence and supply sources]
