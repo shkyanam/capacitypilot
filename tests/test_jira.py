@@ -123,9 +123,14 @@ def test_jira_worker_completes_claimed_request(monkeypatch):
     completed = []
     monkeypatch.setattr(jira_worker, "claim_jira_request", lambda _worker: item)
     monkeypatch.setattr(
-        jira_worker.JiraClient,
-        "create_or_find_issue",
-        lambda _self, _item: {"jira_issue_key": "CAP-1", "jira_issue_url": "url"},
+        jira_worker,
+        "JiraClient",
+        lambda: SimpleNamespace(
+            create_or_find_issue=lambda _item: {
+                "jira_issue_key": "CAP-1",
+                "jira_issue_url": "url",
+            }
+        ),
     )
     monkeypatch.setattr(
         jira_worker, "complete_jira_request", lambda request_id, issue: completed.append((request_id, issue))
@@ -140,9 +145,13 @@ def test_jira_worker_retries_failed_request(monkeypatch):
     failures = []
     monkeypatch.setattr(jira_worker, "claim_jira_request", lambda _worker: item)
     monkeypatch.setattr(
-        jira_worker.JiraClient,
-        "create_or_find_issue",
-        lambda _self, _item: (_ for _ in ()).throw(httpx.TimeoutException("timeout")),
+        jira_worker,
+        "JiraClient",
+        lambda: SimpleNamespace(
+            create_or_find_issue=lambda _item: (_ for _ in ()).throw(
+                httpx.TimeoutException("timeout")
+            )
+        ),
     )
     monkeypatch.setattr(
         jira_worker, "fail_jira_request", lambda claimed, error: failures.append((claimed, error))
