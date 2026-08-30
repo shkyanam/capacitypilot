@@ -95,6 +95,22 @@ def contextual_follow_up_plan(
     return {"intent": "RESERVATION_AUDIT_UNSUPPORTED", **inherited}
 
 
+def planner_review_count_plan(question: str) -> PortfolioQueryPlan | None:
+    """Route the common planner-review count without depending on an LLM."""
+    text = question.lower()
+    if not re.search(r"\b(how many|count|number of)\b", text):
+        return None
+    if not re.search(
+        r"\b(?:need|needs|pending)\s+(?:planner\s+)?review\b", text
+    ):
+        return None
+    return PortfolioQueryPlan(
+        operation="COUNT",
+        planner_states=["NEEDS_REVIEW"],
+        explanation="Direct count of customers awaiting planner review.",
+    )
+
+
 def query_reservation_audit(hours: int | None) -> dict[str, Any]:
     """Count committed local reservations from the authoritative audit table."""
     conditions = ["status='LOCAL_RESERVED'"]
@@ -437,6 +453,16 @@ def answer_portfolio_question(
             "summary": summary,
             "interpreted_as": audit_plan,
             "interpretation_source": "DETERMINISTIC_AUDIT",
+        }
+    review_plan = planner_review_count_plan(question)
+    if review_plan:
+        result = query_portfolio(review_plan)
+        count = int(result["summary"].get("matching_customers") or 0)
+        return {
+            "answer": f"{count:,} customers currently need planner review.",
+            **result,
+            "interpreted_as": review_plan.model_dump(mode="json"),
+            "interpretation_source": "DETERMINISTIC_PORTFOLIO",
         }
     try:
         plan = NebiusClient().portfolio_query_plan(question)

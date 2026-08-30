@@ -1,7 +1,7 @@
 """Deterministic UI action contracts shared by Streamlit and application evals."""
 
 NAVIGATION_PAGES = (
-    "Planner inbox",
+    "Planner review",
     "Customer portfolio",
     "Ask CapacityPilot",
     "Capacity supply",

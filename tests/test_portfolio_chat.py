@@ -29,6 +29,30 @@ def test_fallback_understands_planner_review_count():
     assert plan.planner_states == ["NEEDS_REVIEW"]
 
 
+def test_planner_review_count_bypasses_nebius(monkeypatch):
+    class ForbiddenNebius:
+        def __init__(self):
+            raise AssertionError("Planner-review counts must not call Nebius")
+
+    monkeypatch.setattr(portfolio_chat, "NebiusClient", ForbiddenNebius)
+    monkeypatch.setattr(
+        portfolio_chat,
+        "query_portfolio",
+        lambda plan: {
+            "summary": {"matching_customers": 149},
+            "rows": [],
+        },
+    )
+
+    result = portfolio_chat.answer_portfolio_question(
+        "How many customers need planner review?"
+    )
+
+    assert result["answer"] == "149 customers currently need planner review."
+    assert result["interpretation_source"] == "DETERMINISTIC_PORTFOLIO"
+    assert result["interpreted_as"]["planner_states"] == ["NEEDS_REVIEW"]
+
+
 def test_reservation_audit_plan_parses_24_hour_window():
     plan = portfolio_chat.reservation_audit_plan(
         "How many reservations are approved in the last 24hrs?"

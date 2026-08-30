@@ -22,6 +22,7 @@ dev = ["pytest>=8.4,<9", "pytest-cov>=6.2,<7", "ruff>=0.12,<1"]
 
 [project.scripts]
 capacity-api = "capacity_planner.api:main"
+capacity-start = "capacity_planner.app_runner:main"
 capacity-worker = "capacity_planner.worker:main"
 capacity-seed = "capacity_planner.seed:main"
 capacity-news-enqueue = "capacity_planner.news_jobs:enqueue_main"

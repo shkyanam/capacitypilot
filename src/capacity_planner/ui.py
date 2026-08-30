@@ -1612,6 +1612,11 @@ def render_portfolio_chat() -> None:
                 "This transactional answer was calculated directly from PostgreSQL's "
                 "audited local reservation records; the LLM was not used."
             )
+        elif result.get("interpretation_source") == "DETERMINISTIC_PORTFOLIO":
+            st.caption(
+                "This standard portfolio count was calculated directly from PostgreSQL; "
+                "the LLM was not used."
+            )
         rows = pd.DataFrame(result.get("rows", []))
         if not rows.empty and "reservation_id" in rows.columns:
             rows = rows.rename(
@@ -2430,7 +2435,7 @@ st.sidebar.caption(
 st.sidebar.caption("API connectivity: PASS")
 st.sidebar.caption("Autonomous agents run in the background. Planner approval controls actions.")
 
-if page == "Planner inbox":
+if page == "Planner review":
     render_review_queue(portfolio_status)
 elif page == "Customer portfolio":
     render_customer_portfolio()

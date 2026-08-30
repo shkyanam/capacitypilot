@@ -56,6 +56,16 @@ uv run capacity-worker
 uv run streamlit run src/capacity_planner/ui.py
 ```
 
+Or start the same local stack with one command:
+
+```bash
+uv run capacity-start
+```
+
+This starts the API, Streamlit, and the capacity worker. It also starts the Jira, Slack,
+and Mem0 workers when their corresponding `*_ENABLED` setting is `true`. Press `Ctrl-C`
+to stop every service started by the command.
+
 ## Bulk news ingestion
 
 Set `SEC_USER_AGENT` to your organization and a monitored contact email; placeholder identities are rejected. Then enqueue all companies and run the separate rate-limited worker:
