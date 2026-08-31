@@ -98,6 +98,7 @@ def test_enabled_memory_queues_decision_after_postgres_write(monkeypatch):
             "case_id": "case-1",
             "decision": "APPROVE_REVIEW",
             "recommendation": {"likelihood_pct": 80, "confidence": "MEDIUM"},
+            "planner_comment": "Evidence reviewed",
         }
     ]
 

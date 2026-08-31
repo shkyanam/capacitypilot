@@ -74,7 +74,7 @@ def test_failure_stops_at_attempt_limit(monkeypatch):
     assert fake.calls[0][1][0] == "FAILED"
 
 
-def test_enqueue_contains_only_derived_decision_fields():
+def test_enqueue_includes_bounded_planner_comment_but_not_raw_evidence():
     fake = FakeConnection()
     memory_outbox.enqueue_planner_decision(
         fake,
@@ -86,6 +86,7 @@ def test_enqueue_contains_only_derived_decision_fields():
             "confidence": "MEDIUM",
             "reasons": ["raw customer evidence"],
         },
+        planner_comment="Wait for confirmed customer demand before reserving capacity.",
     )
     payload = json.loads(fake.calls[0][1][2])
     assert payload == {
@@ -93,4 +94,5 @@ def test_enqueue_contains_only_derived_decision_fields():
         "decision": "MONITOR",
         "likelihood_band": "HIGH",
         "confidence": "MEDIUM",
+        "planner_comment": "Wait for confirmed customer demand before reserving capacity.",
     }

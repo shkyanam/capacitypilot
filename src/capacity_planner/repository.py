@@ -745,6 +745,7 @@ def create_local_reservation(request: dict) -> dict:
                 case_id=str(case_id),
                 decision="APPROVE_REVIEW",
                 recommendation=case["recommendation"],
+                planner_comment=request.get("note", ""),
             )
         conn.execute(
             """insert into capacity_planner.case_event(case_id,event_type,payload)

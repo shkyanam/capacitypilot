@@ -11,7 +11,7 @@ This application uses FastAPI, a PostgreSQL-backed worker queue, LangGraph, Nebi
 
 ## Optional Mem0 memory
 
-Mem0 can recall prior planner dispositions for the same customer. PostgreSQL remains the authoritative audit record. The application sends only a minimal derived decision summary to Mem0; it excludes planner notes, raw capacity data, news extracts, and credentials. Memory is advisory and can never bypass data-quality checks, enable an alert, or approve capacity.
+Mem0 can recall prior planner dispositions and the planner's bounded rationale for the same customer. PostgreSQL remains the authoritative audit record. The application sends only a minimal decision summary and up to 500 characters of the planner comment to Mem0; it excludes raw capacity data, news extracts, and credentials. Memory is advisory and can never bypass data-quality checks, enable an alert, or approve capacity.
 
 Add your managed Mem0 key to `.env` (never commit it):
 

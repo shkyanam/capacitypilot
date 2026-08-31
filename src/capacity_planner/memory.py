@@ -161,6 +161,8 @@ def add_outbox_memory(company_id: int, event_type: str, payload: dict[str, Any])
             f"Recommendation likelihood band was {payload.get('likelihood_band', 'unknown')} "
             f"with {payload.get('confidence', 'unknown')} confidence."
         )
+        if payload.get("planner_comment"):
+            content += f" Planner rationale: {payload['planner_comment']}"
     else:
         content = (
             f"Validated expansion outcome for case {payload['case_id']}: "

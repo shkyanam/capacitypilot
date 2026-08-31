@@ -390,6 +390,7 @@ def decide(case_id: str, request: DecisionRequest):
                 case_id=case_id,
                 decision=request.decision,
                 recommendation=case_row["recommendation"] or {},
+                planner_comment=request.note,
             )
     return row
 

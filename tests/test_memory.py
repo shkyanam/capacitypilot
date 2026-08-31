@@ -178,7 +178,7 @@ def test_list_application_memories_reports_provider_failure(monkeypatch):
     assert result["errors"][0]["type"] == "TimeoutError"
 
 
-def test_planner_memory_excludes_notes_and_raw_evidence(monkeypatch):
+def test_planner_memory_includes_bounded_comment_but_not_raw_evidence(monkeypatch):
     client = FakeClient()
     monkeypatch.setattr(memory, "_client", lambda: client)
     monkeypatch.setattr(memory, "get_settings", settings)
@@ -191,6 +191,7 @@ def test_planner_memory_excludes_notes_and_raw_evidence(monkeypatch):
             "decision": "MONITOR",
             "likelihood_band": "HIGH",
             "confidence": "MEDIUM",
+            "planner_comment": "Wait for a signed customer commitment.",
         },
     )
 
@@ -198,6 +199,7 @@ def test_planner_memory_excludes_notes_and_raw_evidence(monkeypatch):
     assert call["user_id"] == "capacity-customer-42"
     assert call["async_mode"] is False
     assert "MONITOR" in call["messages"][0]["content"]
+    assert "signed customer commitment" in call["messages"][0]["content"]
     assert set(call["metadata"]) == {
         "event_type",
         "company_id",

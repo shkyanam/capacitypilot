@@ -52,7 +52,13 @@ def fail_memory(item: dict[str, Any], error: Exception) -> None:
 
 
 def enqueue_planner_decision(
-    conn, *, company_id: int, case_id: str, decision: str, recommendation: dict[str, Any]
+    conn,
+    *,
+    company_id: int,
+    case_id: str,
+    decision: str,
+    recommendation: dict[str, Any],
+    planner_comment: str = "",
 ) -> None:
     likelihood = float(recommendation.get("likelihood_pct", 0))
     band = "HIGH" if likelihood >= 80 else "MEDIUM" if likelihood >= 50 else "LOW"
@@ -62,6 +68,9 @@ def enqueue_planner_decision(
         "likelihood_band": band,
         "confidence": recommendation.get("confidence", "UNKNOWN"),
     }
+    comment = " ".join(planner_comment.split())[:500]
+    if comment:
+        payload["planner_comment"] = comment
     conn.execute(
         """insert into capacity_planner.memory_outbox(
            outbox_id,company_id,event_type,payload) values (%s,%s,'PLANNER_DECISION',%s)""",
