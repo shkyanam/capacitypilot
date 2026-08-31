@@ -1,5 +1,7 @@
 import json
+from argparse import ArgumentParser
 from typing import Any
+from uuid import uuid4
 
 from .config import get_settings
 from .db import connection, migrate
@@ -20,6 +22,98 @@ def enqueue_all() -> int:
             (settings.news_bulk_refresh_hours,),
         )
     return cursor.rowcount
+
+
+def enqueue_limited(limit: int, *, force: bool = False) -> tuple[int, str]:
+    """Snapshot a bounded baseline and queue it; force never interrupts an active lease."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    settings = get_settings()
+    run_id = str(uuid4())
+    with connection() as conn:
+        conn.execute(
+            """insert into capacity_planner.news_semantic_comparison_run(run_id,customer_limit)
+               values (%s,%s)""",
+            (run_id, limit),
+        )
+        conn.execute(
+            """with selected_companies as (
+                   select company_id from capacity_planner.company order by company_id limit %s
+               )
+               insert into capacity_planner.news_evidence_baseline(
+                 run_id,company_id,provider,external_id,title,source_url,excerpt,categories,
+                 relevance_score,metadata)
+               select %s,e.company_id,e.provider,e.external_id,e.title,e.source_url,e.excerpt,
+                 e.categories,e.relevance_score,e.metadata
+               from capacity_planner.news_evidence e
+               join selected_companies s on s.company_id=e.company_id
+               on conflict(run_id,company_id,provider,external_id) do nothing""",
+            (limit, run_id),
+        )
+        cursor = conn.execute(
+            """with selected_companies as (
+                   select company_id from capacity_planner.company order by company_id limit %s
+               )
+               insert into capacity_planner.news_ingestion_job(company_id,status,comparison_run_id)
+               select company_id,'QUEUED',%s from selected_companies
+               on conflict(company_id) do update set
+                 status='QUEUED',attempt_count=0,available_at=now(),locked_at=null,locked_by=null,
+                 last_error=null,updated_at=now(),completed_at=null,
+                 comparison_run_id=excluded.comparison_run_id
+               where capacity_planner.news_ingestion_job.status <> 'RUNNING'
+                 and (
+                   %s
+                   or (
+                     capacity_planner.news_ingestion_job.status in ('COMPLETE','NO_EVIDENCE','FAILED')
+                     and capacity_planner.news_ingestion_job.updated_at
+                         < now()-(%s * interval '1 hour')
+                   )
+                 )""",
+            (limit, run_id, force, settings.news_bulk_refresh_hours),
+        )
+    return cursor.rowcount, run_id
+
+
+def latest_comparison() -> dict[str, Any] | None:
+    """Return a named, evidence-level lexical-versus-semantic comparison for the latest run."""
+    with connection() as conn:
+        run = conn.execute(
+            """select run_id,customer_limit,created_at
+               from capacity_planner.news_semantic_comparison_run
+               order by created_at desc limit 1"""
+        ).fetchone()
+        if not run:
+            return None
+        rows = conn.execute(
+            """select c.company_name,c.ticker,b.provider,b.source_url,
+                 b.categories before_categories,b.excerpt before_excerpt,
+                 e.categories after_categories,e.excerpt after_excerpt,
+                 coalesce(e.metadata->'semantic_retrieval'->'matches','[]'::jsonb) semantic_matches,
+                 case
+                   when e.news_id is null then 'PENDING_REFRESH'
+                   when not (e.metadata ? 'semantic_retrieval') then 'NOT_EVALUATED'
+                   when jsonb_array_length(coalesce(e.metadata->'semantic_retrieval'->'matches',
+                     '[]'::jsonb)) > 0 then 'MATCH_FOUND'
+                   else 'NO_MATCH_FOUND'
+                 end semantic_status
+               from capacity_planner.news_evidence_baseline b
+               join capacity_planner.company c on c.company_id=b.company_id
+               left join capacity_planner.news_evidence e
+                 on e.company_id=b.company_id and e.provider=b.provider and e.external_id=b.external_id
+               where b.run_id=%s
+               order by c.company_name,b.provider""",
+            (run["run_id"],),
+        ).fetchall()
+    values = [dict(row) for row in rows]
+    return {
+        **dict(run),
+        "rows": values,
+        "semantic_summary": {
+            "evaluated": sum(row["semantic_status"] in {"MATCH_FOUND", "NO_MATCH_FOUND"} for row in values),
+            "matches": sum(row["semantic_status"] == "MATCH_FOUND" for row in values),
+            "pending": sum(row["semantic_status"] == "PENDING_REFRESH" for row in values),
+        },
+    }
 
 
 def claim_job(worker_id: str) -> dict[str, Any] | None:
@@ -126,7 +220,24 @@ def status_counts() -> dict[str, Any]:
 
 def enqueue_main() -> None:
     migrate()
-    print(f"Queued or refreshed {enqueue_all()} company news-ingestion jobs")
+    parser = ArgumentParser(description="Queue bounded SEC/news ingestion work")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=get_settings().news_bulk_company_limit,
+        help="Maximum customers to queue (default: NEWS_BULK_COMPANY_LIMIT)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Requeue completed or no-evidence jobs immediately; never interrupts RUNNING jobs",
+    )
+    args = parser.parse_args()
+    queued, run_id = enqueue_limited(args.limit, force=args.force)
+    print(
+        f"Queued or refreshed {queued} of the first {args.limit} customer news-ingestion jobs "
+        f"(comparison run {run_id})"
+    )
 
 
 if __name__ == "__main__":

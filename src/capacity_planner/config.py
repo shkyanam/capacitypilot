@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     nebius_api_key: str = ""
     nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1"
     nebius_chat_model: str = "meta-llama/Llama-3.3-70B-Instruct"
+    nebius_embedding_model: str = ""
     portfolio_chat_timeout_seconds: float = Field(default=10, ge=5, le=60)
     api_base_url: str = "http://localhost:8000"
     api_auth_token: str = "local-development-only"
@@ -25,8 +26,12 @@ class Settings(BaseSettings):
     stale_case_minutes: int = Field(default=15, ge=1, le=1440)
     sec_min_request_interval_seconds: float = Field(default=0.15, ge=0.1, le=10)
     news_bulk_company_interval_seconds: float = Field(default=1, ge=0.1, le=300)
+    news_bulk_company_limit: int = Field(default=100, ge=1, le=1000)
     news_bulk_max_attempts: int = Field(default=3, ge=1, le=10)
     news_bulk_refresh_hours: int = Field(default=24, ge=1, le=720)
+    news_semantic_enabled: bool = True
+    news_semantic_chunk_chars: int = Field(default=1200, ge=300, le=4000)
+    news_semantic_top_k: int = Field(default=3, ge=1, le=5)
     mem0_enabled: bool = False
     mem0_api_key: str = ""
     mem0_agent_id: str = "capacity-planner"

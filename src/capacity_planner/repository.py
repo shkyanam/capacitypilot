@@ -493,30 +493,37 @@ def capacity_availability(
             ),
         ).fetchall()
     request = Decimal(str(requested_tib))
+    fresh_rows = [row for row in rows if row["inventory_usable"]]
+    regional_available = sum(
+        (Decimal(row["available_capacity_tib"]) for row in fresh_rows), Decimal(0)
+    )
+    regional_usable = sum(
+        (Decimal(row["usable_capacity_tib"]) for row in fresh_rows), Decimal(0)
+    )
+    regional_allocated = sum(
+        (Decimal(row["allocated_capacity_tib"]) + Decimal(row["planning_hold_tib"]) for row in fresh_rows),
+        Decimal(0),
+    )
+    regional_sufficient = bool(fresh_rows) and request <= regional_available
+    regional_post_pct = (
+        ((regional_allocated + request) / regional_usable * 100).quantize(Decimal("0.01"))
+        if regional_usable
+        else Decimal(0)
+    )
     result = []
     for row in rows:
         item = dict(row)
-        available = Decimal(item["available_capacity_tib"])
-        usable = Decimal(item["usable_capacity_tib"])
-        allocated_after = (
-            Decimal(item["allocated_capacity_tib"])
-            + Decimal(item["planning_hold_tib"])
-            + request
-        )
-        post_pct = (allocated_after / usable * 100).quantize(Decimal("0.01"))
-        sufficient = bool(item["inventory_usable"]) and request <= available
         item.update(
             {
                 "company_id": case["company_id"],
                 "customer_region": case["region"],
                 "requested_tib": request,
-                "available_after_tib": max(Decimal(0), available - request),
-                "shortfall_tib": max(Decimal(0), request - available),
-                "post_reservation_allocation_pct": post_pct,
-                "capacity_sufficient": sufficient,
-                "infrastructure_order_required": (
-                    not sufficient or post_pct >= Decimal(70)
-                ),
+                "regional_available_tib": regional_available,
+                "available_after_tib": max(Decimal(0), regional_available - request),
+                "shortfall_tib": max(Decimal(0), request - regional_available),
+                "post_reservation_allocation_pct": regional_post_pct,
+                "capacity_sufficient": regional_sufficient,
+                "infrastructure_order_required": not regional_sufficient,
             }
         )
         result.append(item)
@@ -576,21 +583,26 @@ def create_local_reservation(request: dict) -> dict:
             raise LookupError(
                 f"Reservation region must match customer region {case['region']}"
             )
-        inventory = conn.execute(
-            """select *,
+        inventories = conn.execute(
+            """select i.*,
                  (freshness_status='FRESH' and
-                   source_updated_at >= now()-(%s * interval '1 hour')) inventory_usable
-               from capacity_planner.capacity_inventory
-               where region=%s and qfab=%s and service=%s and vault_type=%s
+                   source_updated_at >= now()-(%s * interval '1 hour')) inventory_usable,
+                 coalesce((
+                   select sum(r.requested_tib) from capacity_planner.local_capacity_reservation r
+                   where r.status='LOCAL_RESERVED' and r.region=i.region and r.qfab=i.qfab
+                     and r.service=i.service and r.vault_type=i.vault_type
+                 ),0) planning_hold_tib
+               from capacity_planner.capacity_inventory i
+               where region=%s and service=%s and vault_type=%s
                for update""",
             (
                 get_settings().capacity_inventory_max_age_hours,
                 case["region"],
-                request["qfab"],
                 request["service"],
                 request["vault_type"],
             ),
-        ).fetchone()
+        ).fetchall()
+        inventory = next((row for row in inventories if row["qfab"] == request["qfab"]), None)
         if not inventory or not inventory["inventory_usable"]:
             raise CapacityUnavailableError(
                 {
@@ -600,23 +612,16 @@ def create_local_reservation(request: dict) -> dict:
                     "qfab": request["qfab"],
                 }
             )
-        holds = conn.execute(
-            """select coalesce(sum(requested_tib),0) planning_hold_tib
-               from capacity_planner.local_capacity_reservation
-               where status='LOCAL_RESERVED' and region=%s and qfab=%s
-                 and service=%s and vault_type=%s""",
-            (
-                case["region"],
-                request["qfab"],
-                request["service"],
-                request["vault_type"],
-            ),
-        ).fetchone()
         requested = Decimal(str(request["requested_tib"]))
-        available_before = (
-            Decimal(inventory["usable_capacity_tib"])
-            - Decimal(inventory["allocated_capacity_tib"])
-            - Decimal(holds["planning_hold_tib"])
+        fresh_inventories = [row for row in inventories if row["inventory_usable"]]
+        available_before = sum(
+            (
+                Decimal(row["usable_capacity_tib"])
+                - Decimal(row["allocated_capacity_tib"])
+                - Decimal(row["planning_hold_tib"])
+                for row in fresh_inventories
+            ),
+            Decimal(0),
         )
         if requested > available_before:
             raise CapacityUnavailableError(
@@ -624,7 +629,6 @@ def create_local_reservation(request: dict) -> dict:
                     "reason": "INSUFFICIENT_CAPACITY",
                     "message": "Insufficient capacity; new infrastructure is required",
                     "region": case["region"],
-                    "qfab": request["qfab"],
                     "requested_tib": float(requested),
                     "available_tib": float(max(Decimal(0), available_before)),
                     "shortfall_tib": float(requested - available_before),
@@ -633,14 +637,20 @@ def create_local_reservation(request: dict) -> dict:
         available_after = available_before - requested
         post_pct = (
             (
-                Decimal(inventory["allocated_capacity_tib"])
-                + Decimal(holds["planning_hold_tib"])
+                sum(
+                    (
+                        Decimal(row["allocated_capacity_tib"])
+                        + Decimal(row["planning_hold_tib"])
+                        for row in fresh_inventories
+                    ),
+                    Decimal(0),
+                )
                 + requested
             )
-            / Decimal(inventory["usable_capacity_tib"])
+            / sum((Decimal(row["usable_capacity_tib"]) for row in fresh_inventories), Decimal(0))
             * 100
         ).quantize(Decimal("0.01"))
-        infrastructure_order_recommended = post_pct >= Decimal(70)
+        infrastructure_order_recommended = False
 
         reservation_id = uuid.uuid4()
         row = conn.execute(

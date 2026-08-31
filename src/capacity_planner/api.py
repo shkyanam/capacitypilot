@@ -18,7 +18,7 @@ from .models import (
     PortfolioChatRequest,
     SlackDigestRequest,
 )
-from .news_jobs import enqueue_all, status_counts
+from .news_jobs import enqueue_all, latest_comparison, status_counts
 from .portfolio_chat import answer_portfolio_question
 from .repository import (
     CapacityUnavailableError,
@@ -128,6 +128,7 @@ def shortlist(
     min_likelihood: float = 75,
     pending_only: bool = False,
     alert_eligible_only: bool = False,
+    exclude_simulations: bool = False,
 ):
     threshold = min(max(min_likelihood, 0), 100)
     pending_filter = """
@@ -146,6 +147,7 @@ def shortlist(
                and coalesce(o.action,r.recommendation->>'action')='PLANNER_REVIEW'
                and coalesce(o.capacity_growth_tib,
                  (r.recommendation->>'capacity_growth_tib')::numeric) > 0""" if alert_eligible_only else ""
+    simulation_filter = "and r.scenario_id is null" if exclude_simulations else ""
     with connection() as conn:
         rows = conn.execute(
             f"""select c.company_id,c.company_name,c.ticker,c.exchange,c.region,r.case_id,r.status,
@@ -198,6 +200,7 @@ def shortlist(
                  (r.recommendation->>'likelihood_pct')::numeric) >= %s
                {pending_filter}
                {alert_filter}
+               {simulation_filter}
                order by likelihood_pct desc,capacity_growth_tib desc nulls last""",
             (threshold,),
         ).fetchall()
@@ -336,6 +339,11 @@ def enqueue_news_ingestion():
 @app.get("/news-ingestion/status", dependencies=[Depends(authorize)])
 def news_ingestion_status():
     return status_counts()
+
+
+@app.get("/news-ingestion/comparisons/latest", dependencies=[Depends(authorize)])
+def latest_news_comparison():
+    return latest_comparison() or {"rows": []}
 
 
 @app.post("/cases", status_code=202, dependencies=[Depends(authorize)])

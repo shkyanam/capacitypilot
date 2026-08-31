@@ -14,6 +14,7 @@ CUSTOMER_REGIONS = (
     "uk-london-1",
     "ap-tokyo-1",
 )
+DEFAULT_CUSTOMER_COUNT = 100
 
 
 def customer_region(cik: int) -> str:
@@ -46,7 +47,7 @@ def synthetic_signal(cik: int) -> tuple:
     )
 
 
-def fetch_companies(limit: int = 1000) -> list[dict]:
+def fetch_companies(limit: int = DEFAULT_CUSTOMER_COUNT) -> list[dict]:
     settings = get_settings()
     response = httpx.get(SEC_URL, headers={"User-Agent": settings.sec_user_agent}, timeout=60)
     response.raise_for_status()
@@ -57,7 +58,7 @@ def fetch_companies(limit: int = 1000) -> list[dict]:
     return eligible[:limit]
 
 
-def load(limit: int = 1000) -> int:
+def load(limit: int = DEFAULT_CUSTOMER_COUNT) -> int:
     migrate()
     records = fetch_companies(limit)
     with connection() as conn:
@@ -97,7 +98,7 @@ def load(limit: int = 1000) -> int:
 
 
 def main() -> None:
-    count = load(1000)
+    count = load()
     print(f"Loaded {count} real SEC company identities with synthetic planning signals")
 
 

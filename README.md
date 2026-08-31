@@ -31,13 +31,22 @@ If Mem0 is unavailable, the PostgreSQL decision still commits, the outbox retrie
 
 ## Data truth
 
-The first 1,000 company identities (name, SEC CIK, ticker, exchange) are downloaded from the official SEC EDGAR company-ticker dataset. Storage, utilization, expansion, and demand values are deterministic **synthetic demonstration data**, because customer operational capacity data is not public. Every row carries `data_classification = SYNTHETIC_DEMO`.
+The first 100 company identities (name, SEC CIK, ticker, exchange) are downloaded from the official SEC EDGAR company-ticker dataset. Storage, utilization, expansion, and demand values are deterministic **synthetic demonstration data**, because customer operational capacity data is not public. Every row carries `data_classification = SYNTHETIC_DEMO`.
 
 ## Production news evidence
 
 The News Agent retrieves recent authoritative SEC filings for the selected company, extracts short signal-focused passages, classifies acquisitions, growth plans, data-center activity, capacity investments, and geographic expansion, and stores the citation and audit metadata in `capacity_planner.news_evidence`. Results are cached for 24 hours and deduplicated by provider identity and URL.
 
 Set `NEWS_API_KEY` only when the organization has an appropriate production News API license. When configured, licensed publisher headlines and snippets are combined with SEC evidence. Provider failures degrade confidence, suppress alerts, and remain visible to the planner.
+
+### Optional semantic filing retrieval
+
+Keyword matching remains the default high-precision parser. When `NEBIUS_EMBEDDING_MODEL` is
+configured, the application uses the existing Nebius API key and base URL to chunk each SEC
+filing and retrieve up to three semantically relevant passages. The configured Nebius chat model
+classifies only those retrieved passages using the fixed signal taxonomy. Source citations,
+similarity scores, and any semantic-service error are retained with the SEC evidence. Semantic
+matches are advisory: they do not bypass data-quality, alert, or planner-approval controls.
 
 ## Local setup
 
@@ -47,6 +56,15 @@ cp .env.example .env
 uv sync --extra dev
 uv run capacity-seed
 ```
+
+If an older local demo database contains more customers, retain only the first 100 and remove
+their dependent local demo records with:
+
+```bash
+uv run capacity-prune-demo --keep 100 --confirm-prune
+```
+
+The command refuses to remove a customer with an active news or capacity investigation job.
 
 Run these in three terminals:
 
@@ -71,9 +89,15 @@ to stop every service started by the command.
 Set `SEC_USER_AGENT` to your organization and a monitored contact email; placeholder identities are rejected. Then enqueue all companies and run the separate rate-limited worker:
 
 ```bash
-uv run capacity-news-enqueue
+uv run capacity-news-enqueue --limit 100
 uv run capacity-news-worker
 ```
+
+To deliberately reprocess the first 100 customers before the normal refresh window expires,
+use `uv run capacity-news-enqueue --limit 100 --force`. The command snapshots the existing
+keyword-only evidence first, then never resets a `RUNNING` news job. **System health** displays
+the resulting comparison, including customer names read from PostgreSQL, keyword-only versus
+hybrid categories/excerpts, and cited semantic matches.
 
 The worker processes one company at a time, uses PostgreSQL `SKIP LOCKED`, retries transient failures, recovers stale jobs, caches evidence, and refreshes completed companies after 24 hours. Progress is visible in Streamlit under **Bulk news ingestion**.
 
@@ -98,11 +122,11 @@ Each customer has a capacity region. The **Regional capacity** page shows usable
 
 From **Review queue**, select a customer and complete **Create local reservation**. The application derives the customer region, lets the planner select a compatible QFAB/service/vault pool, and displays capacity before and after the request. Reservation is disabled when inventory is missing, stale, or insufficient. The PostgreSQL transaction locks and rechecks the pool before inserting, so concurrent planners cannot over-reserve it.
 
-A successful submission creates one idempotent `LOCAL_RESERVED` row per investigation in `capacity_planner.local_capacity_reservation`, stores the inventory snapshot, records an `APPROVE_REVIEW` decision, writes a case audit event, and queues the derived Mem0 decision when memory is enabled. If post-reservation allocation reaches 70%, the application recommends ordering additional regional infrastructure. A shortage blocks reservation and reports the TiB shortfall. When Jira is enabled, the same approval automatically queues a `CAP_RESERVATION` request and, when the 70% threshold is reached, a `HUB_INFRASTRUCTURE` request. Jira delivery remains asynchronous and retryable, so Jira downtime does not roll back the committed reservation.
+A successful submission creates one idempotent `LOCAL_RESERVED` row per investigation in `capacity_planner.local_capacity_reservation`, stores the regional availability snapshot, records an `APPROVE_REVIEW` decision, writes a case audit event, and queues the derived Mem0 decision when memory is enabled. A reservation is allowed when the requested TiB does not exceed the total fresh available capacity in the customer's region; a shortage blocks reservation and reports the TiB shortfall. When Jira is enabled, the approval automatically queues a `CAP_RESERVATION` request. Jira delivery remains asynchronous and retryable, so Jira downtime does not roll back the committed reservation.
 
 After approval, the customer leaves the unresolved review inbox and the first Streamlit screen displays **Latest reservation and Jira handoff**, including CAP/HUB delivery status and clickable Jira ticket links. The separate **Jira requests** page retains the complete handoff history.
 
-The default Streamlit screen and Slack use the same action-inbox contract: unresolved, `alert_allowed=true`, at least 80% likelihood, MEDIUM/HIGH confidence, positive estimated growth, and no prior planner decision or local reservation. Both route an item to **Reserve available capacity** when a fresh regional pool can absorb the estimated growth below 70% allocation, or **Order more storage** otherwise. The exact service, vault, and QFAB are always revalidated before a decision is committed.
+The default Streamlit screen and Slack use the same action-inbox contract: unresolved, `alert_allowed=true`, at least 80% likelihood, MEDIUM/HIGH confidence, positive estimated growth, and no prior planner decision or local reservation. Both route an item to **Reserve available capacity** when total fresh capacity in the customer's region can absorb the estimated growth, or **Order more storage** otherwise. The selected service, vault, and QFAB are retained as reservation metadata.
 
 Use **Quality & evals** in CapacityPilot to inspect persisted Data Quality Agent results for all 16 checks, recent per-customer failures, specialist evidence coverage, labeled-outcome precision against the 80% target, case status distribution, specialist execution counts, retries, and recent terminal orchestration failures.
 
@@ -120,7 +144,6 @@ Jira creation follows the explicit planner approval in Streamlit:
 
 - Available regional capacity: make the local reservation, then create a reservation ticket in the `CAP` project.
 - Insufficient regional capacity: reservation is blocked and an infrastructure-order ticket can be created in the `HUB` project.
-- Reservation leaves the pool at or above 70% allocation: create the `CAP` ticket and optionally create a `HUB` replenishment ticket.
 - Regional supply planning: use **Create regional HUB request** on the Streamlit home page to order infrastructure for a verified region/QFAB/storage-tier pool without attaching a customer. The planner must supply an order quantity, required date, identity, justification, and explicit confirmation. Active duplicate orders for the same pool are suppressed.
 
 Requests first enter the PostgreSQL `capacity_planner.jira_request` outbox. A separate worker creates the Jira issue with an idempotency label and retries transient failures:

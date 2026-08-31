@@ -26,7 +26,9 @@ def run_once(worker_id: str) -> bool:
         return False
     company_id = job["company_id"]
     try:
-        result = collect_news(company_id)
+        # A comparison run deliberately refreshes sources so semantic retrieval is not skipped
+        # by the ordinary 24-hour evidence cache.
+        result = collect_news(company_id, refresh=bool(job.get("comparison_run_id")))
         finish_job(job, result)
         LOG.info(
             "news_job_completed company_id=%s status=%s evidence=%s",

@@ -56,8 +56,7 @@ def eligible_row(*, available, growth=100, scenario_id=None):
         "region": "us-phoenix-1",
         "scenario_id": scenario_id,
         "growth_tib": Decimal(growth),
-        "max_available_tib": Decimal(available),
-        "capacity_before_order_threshold_tib": Decimal(available),
+        "regional_available_tib": Decimal(available),
         "updated_at": datetime.now(UTC),
     }
 

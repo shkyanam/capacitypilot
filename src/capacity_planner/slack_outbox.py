@@ -50,17 +50,12 @@ def capacity_alert_summary() -> dict[str, Any]:
                      where lr.case_id=lc.case_id and lr.status='LOCAL_RESERVED'
                    )
                )
-               select e.*,coalesce(cap.max_available_tib,0) max_available_tib,
-                 coalesce(cap.capacity_before_order_threshold_tib,0)
-                   capacity_before_order_threshold_tib
+               select e.*,coalesce(cap.regional_available_tib,0) regional_available_tib
                from effective e
                left join lateral (
                    select
-                     max(greatest(i.usable_capacity_tib-i.allocated_capacity_tib-
-                       coalesce(h.planning_hold_tib,0),0)) max_available_tib,
-                     max(greatest(i.usable_capacity_tib*0.70-i.allocated_capacity_tib-
-                       coalesce(h.planning_hold_tib,0),0))
-                       capacity_before_order_threshold_tib
+                     sum(greatest(i.usable_capacity_tib-i.allocated_capacity_tib-
+                       coalesce(h.planning_hold_tib,0),0)) regional_available_tib
                    from capacity_planner.capacity_inventory i
                    left join lateral (
                      select sum(lr.requested_tib) planning_hold_tib
@@ -84,7 +79,7 @@ def capacity_alert_summary() -> dict[str, Any]:
         item = dict(row)
         route = (
             "RESERVE_CAPACITY"
-            if item["capacity_before_order_threshold_tib"] >= item["growth_tib"]
+            if item["regional_available_tib"] >= item["growth_tib"]
             else "ORDER_MORE_STORAGE"
         )
         items.append(
@@ -95,10 +90,7 @@ def capacity_alert_summary() -> dict[str, Any]:
                 "ticker": item["ticker"],
                 "region": item["region"],
                 "growth_tib": item["growth_tib"],
-                "max_available_tib": item["max_available_tib"],
-                "capacity_before_order_threshold_tib": item[
-                    "capacity_before_order_threshold_tib"
-                ],
+                "regional_available_tib": item["regional_available_tib"],
                 "route": route,
                 "test_scenario": item["scenario_id"] is not None,
                 "updated_at": item["updated_at"],

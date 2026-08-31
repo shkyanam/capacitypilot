@@ -37,6 +37,7 @@ def patch_connection(monkeypatch, fake):
 
 def settings():
     return SimpleNamespace(
+        news_bulk_company_limit=100,
         news_bulk_refresh_hours=24,
         news_bulk_max_attempts=3,
         stale_case_minutes=15,
@@ -50,6 +51,19 @@ def test_enqueue_all_is_idempotent_and_refresh_aware(monkeypatch):
     assert news_jobs.enqueue_all() == 1000
     assert "on conflict(company_id) do update" in fake.calls[0][0].lower()
     assert fake.calls[0][1] == (24,)
+
+
+def test_enqueue_limited_force_targets_only_requested_customers(monkeypatch):
+    fake = FakeConnection([Cursor(), Cursor(), Cursor(rowcount=100)])
+    patch_connection(monkeypatch, fake)
+    monkeypatch.setattr(news_jobs, "get_settings", settings)
+    queued, run_id = news_jobs.enqueue_limited(100, force=True)
+    assert queued == 100
+    assert run_id
+    sql, params = fake.calls[2]
+    assert "selected_companies" in sql
+    assert "status <> 'RUNNING'" in sql
+    assert params == (100, run_id, True, 24)
 
 
 def test_claim_job_uses_skip_locked(monkeypatch):

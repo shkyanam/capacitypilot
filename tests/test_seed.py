@@ -1,4 +1,13 @@
-from capacity_planner.seed import CUSTOMER_REGIONS, customer_region, synthetic_signal
+from capacity_planner.seed import (
+    CUSTOMER_REGIONS,
+    DEFAULT_CUSTOMER_COUNT,
+    customer_region,
+    synthetic_signal,
+)
+
+
+def test_default_customer_seed_count_is_100():
+    assert DEFAULT_CUSTOMER_COUNT == 100
 
 
 def test_synthetic_signals_are_deterministic_and_valid():

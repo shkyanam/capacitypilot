@@ -273,11 +273,6 @@ def render_customer_recommendation(shortlist: pd.DataFrame) -> None:
             after.metric(
                 "Available after", f"{float(reservation['available_after_tib']):,.1f} TiB"
             )
-        if reservation.get("infrastructure_order_recommended"):
-            st.warning(
-                "This reservation crossed the 70% allocation threshold. Additional "
-                "regional infrastructure should be ordered."
-            )
         st.subheader("Jira handoff")
         cap_request = jira_by_type.get("CAP_RESERVATION")
         if cap_request:
@@ -434,9 +429,7 @@ def render_customer_recommendation(shortlist: pd.DataFrame) -> None:
             )
             st.subheader("Regional capacity check")
             total_col, allocated_col, held_col = st.columns(3)
-            total_col.metric(
-                "Usable", f"{float(selected_capacity['usable_capacity_tib']):,.1f} TiB"
-            )
+            total_col.metric("Regional available", f"{float(selected_capacity['regional_available_tib']):,.1f} TiB")
             allocated_col.metric(
                 "Allocated",
                 f"{float(selected_capacity['allocated_capacity_tib']):,.1f} TiB",
@@ -447,16 +440,14 @@ def render_customer_recommendation(shortlist: pd.DataFrame) -> None:
             )
             available_col, request_col, after_col = st.columns(3)
             available_col.metric(
-                "Available now",
+                "Selected pool available",
                 f"{float(selected_capacity['available_capacity_tib']):,.1f} TiB",
             )
             request_col.metric("Requested", f"{requested_tib:,.1f} TiB")
             after_col.metric(
-                "Available after",
+                "Regional available after",
                 f"{float(selected_capacity['available_after_tib']):,.1f} TiB",
             )
-            post_pct = float(selected_capacity["post_reservation_allocation_pct"])
-            st.progress(min(1.0, post_pct / 100), text=f"Post-reservation allocation: {post_pct:.1f}%")
             st.caption(
                 f"Inventory: {selected_capacity['data_classification']} · "
                 f"{selected_capacity['freshness_status']} · Refreshed "
@@ -464,14 +455,9 @@ def render_customer_recommendation(shortlist: pd.DataFrame) -> None:
             )
             if not selected_capacity["capacity_sufficient"]:
                 st.error(
-                    f"Insufficient capacity in {region}/{qfab}. Shortfall: "
+                    f"Insufficient regional capacity in {region}. Shortfall: "
                     f"{float(selected_capacity['shortfall_tib']):,.1f} TiB. "
                     "Do not reserve; order new regional infrastructure."
-                )
-            elif selected_capacity["infrastructure_order_required"]:
-                st.warning(
-                    "Capacity is sufficient for this reservation, but the resulting "
-                    "allocation reaches the 70% infrastructure-order threshold."
                 )
             else:
                 st.success("Sufficient regional capacity is available for reservation.")
@@ -1081,9 +1067,10 @@ def render_review_queue(portfolio: dict) -> None:
     )
     shortlist = prepare_shortlist(
         load(
-            "/shortlist?min_likelihood=80&pending_only=true&alert_eligible_only=true"
+            "/shortlist?min_likelihood=0&pending_only=true&exclude_simulations=true"
         )
     )
+    shortlist = shortlist.head(10).copy()
     if shortlist.empty:
         st.success("You are caught up — there are no recommendations awaiting review.")
         render_home_follow_up()
@@ -1096,42 +1083,20 @@ def render_review_queue(portfolio: dict) -> None:
         inventory["available_capacity_tib"] = pd.to_numeric(
             inventory["available_capacity_tib"], errors="coerce"
         ).fillna(0)
-        inventory["usable_capacity_tib"] = pd.to_numeric(
-            inventory["usable_capacity_tib"], errors="coerce"
-        ).fillna(0)
-        inventory["allocated_capacity_tib"] = pd.to_numeric(
-            inventory["allocated_capacity_tib"], errors="coerce"
-        ).fillna(0)
-        inventory["planning_hold_tib"] = pd.to_numeric(
-            inventory["planning_hold_tib"], errors="coerce"
-        ).fillna(0)
-        inventory["capacity_before_order_threshold_tib"] = (
-            inventory["usable_capacity_tib"] * 0.70
-            - inventory["allocated_capacity_tib"]
-            - inventory["planning_hold_tib"]
-        ).clip(lower=0)
         usable = inventory[inventory["freshness_status"] == "FRESH"]
         available_by_region = (
-            usable.groupby("region")["available_capacity_tib"].max().to_dict()
-        )
-        safe_capacity_by_region = (
-            usable.groupby("region")["capacity_before_order_threshold_tib"]
-            .max()
-            .to_dict()
+            usable.groupby("region")["available_capacity_tib"].sum().to_dict()
         )
     if inventory.empty:
-        safe_capacity_by_region = {}
-    shortlist["Best available regional pool (TiB)"] = (
+        available_by_region = {}
+    shortlist["Regional available capacity (TiB)"] = (
         shortlist["Region"].map(available_by_region).fillna(0)
-    )
-    shortlist["Capacity before 70% threshold (TiB)"] = (
-        shortlist["Region"].map(safe_capacity_by_region).fillna(0)
     )
     growth = pd.to_numeric(shortlist["Suggested growth (TiB)"], errors="coerce")
     shortlist["Capacity action"] = "Order more storage"
     shortlist.loc[
         growth.notna()
-        & (growth <= shortlist["Capacity before 70% threshold (TiB)"]),
+        & (growth <= shortlist["Regional available capacity (TiB)"]),
         "Capacity action",
     ] = "Reserve available capacity"
 
@@ -1146,7 +1111,7 @@ def render_review_queue(portfolio: dict) -> None:
     c3.metric("Needs new infrastructure", order_count)
     c4.metric("Planning simulations", scenario_count)
 
-    st.subheader("Recommended actions")
+    st.subheader("Top 10 recommendations")
     filter_one, filter_two = st.columns(2)
     route_filter = filter_one.selectbox(
         "Next step",
@@ -1168,7 +1133,7 @@ def render_review_queue(portfolio: dict) -> None:
             "Evidence confidence",
             "Expected need (days)",
             "Suggested growth (TiB)",
-            "Best available regional pool (TiB)",
+            "Regional available capacity (TiB)",
             "Capacity action",
             "Signal type",
         ]
@@ -1179,7 +1144,7 @@ def render_review_queue(portfolio: dict) -> None:
             "Evidence confidence": "Confidence",
             "Expected need (days)": "Need in days",
             "Suggested growth (TiB)": "Growth TiB",
-            "Best available regional pool (TiB)": "Available TiB",
+            "Regional available capacity (TiB)": "Available TiB",
             "Capacity action": "Next step",
             "Signal type": "Signal",
         }
@@ -1197,9 +1162,8 @@ def render_review_queue(portfolio: dict) -> None:
         },
     )
     st.caption(
-        "Reserve capacity means at least one fresh regional pool can absorb the estimated growth "
-        "and remain below the 70% planning threshold. The selected pool is revalidated when "
-        "the planner confirms the action."
+        "Reserve capacity means the requested TiB is no greater than the total fresh capacity "
+        "available in the customer's region."
     )
 
     if visible.empty:
@@ -1372,6 +1336,8 @@ def render_case_result(case_id: str) -> None:
     )
     st.write("Why the agent reached this result")
     for reason in recommendation.get("reasons", []):
+        if "production_data_only" in reason.lower():
+            continue
         st.write(f"- {reason}")
 
     quality_event = next(
@@ -1380,11 +1346,23 @@ def render_case_result(case_id: str) -> None:
     )
     if quality_event:
         quality = quality_event["payload"]
-        q1, q2, q3 = st.columns(3)
-        q1.metric("Data quality", f"{quality.get('quality_score_pct', 0):.1f}%")
-        q2.metric("Technical quality", f"{quality.get('technical_quality_score_pct', 0):.1f}%")
-        q3.metric("Production ready", "Yes" if quality.get("production_eligible") else "No")
-        if quality.get("failed_checks"):
+        failed_checks = quality.get("failed_checks", [])
+        synthetic_demo = failed_checks == ["production_data_only"]
+        if synthetic_demo:
+            q1, q2 = st.columns(2)
+            q1.metric("Technical quality", f"{quality.get('technical_quality_score_pct', 0):.1f}%")
+            q2.metric("Data source", "Synthetic demonstration data")
+            st.info(
+                "Storage history, demand, and expansion values shown for this customer are "
+                "synthetic demonstration data. They support local workflow testing only and "
+                "must be replaced with approved production data before operational use."
+            )
+        else:
+            q1, q2, q3 = st.columns(3)
+            q1.metric("Data quality", f"{quality.get('quality_score_pct', 0):.1f}%")
+            q2.metric("Technical quality", f"{quality.get('technical_quality_score_pct', 0):.1f}%")
+            q3.metric("Production ready", "Yes" if quality.get("production_eligible") else "No")
+        if failed_checks and not synthetic_demo:
             st.warning("Failed checks: " + ", ".join(quality["failed_checks"]))
 
     news_event = next(
@@ -1816,6 +1794,14 @@ def render_quality_evals() -> None:
         )
         q4.metric("Technically passed", quality["technical_passed_runs"])
         st.caption(f"Last quality run: {refresh_label(quality.get('last_run_at'))}")
+        st.info(
+            "**Demo-data disclaimer:** Customer identities come from SEC EDGAR, but this local "
+            "application uses deterministic synthetic storage history and demand signals. These "
+            "records can pass technical checks for completeness, freshness, and valid ranges, "
+            "but fail `production_data_only`; therefore their overall quality can be 93.8% "
+            "(15 of 16 checks) and they are not production eligible. In production, replace "
+            "the synthetic signals with approved customer data classified as `PRODUCTION`."
+        )
 
         checks = pd.DataFrame(quality["checks"])
         st.subheader("Check pass rates")
@@ -2415,6 +2401,33 @@ def render_system_status(portfolio: dict) -> None:
     n2.metric("Processing", jobs.get("RUNNING", 0))
     n3.metric("Companies processed", news.get("processed_jobs", 0))
     n4.metric("Evidence records", news.get("evidence_records", 0))
+    comparison = load("/news-ingestion/comparisons/latest")
+    comparison_rows = comparison.get("rows", [])
+    if comparison_rows:
+        semantic_summary = comparison.get("semantic_summary", {})
+        st.caption(
+            "Latest keyword-only versus semantic comparison. Customer names are read from "
+            "PostgreSQL, not inferred from an LLM."
+        )
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Semantic evidence evaluated", semantic_summary.get("evaluated", 0))
+        s2.metric("Semantic matches found", semantic_summary.get("matches", 0))
+        s3.metric("Awaiting refresh", semantic_summary.get("pending", 0))
+        comparison_frame = pd.DataFrame(comparison_rows).rename(
+            columns={
+                "company_name": "Customer",
+                "ticker": "Ticker",
+                "provider": "Source",
+                "before_categories": "Before categories",
+                "after_categories": "After categories",
+                "before_excerpt": "Keyword-only excerpt",
+                "after_excerpt": "Hybrid excerpt",
+                "semantic_matches": "Semantic matches",
+                "semantic_status": "Semantic status",
+                "source_url": "Source URL",
+            }
+        )
+        st.dataframe(comparison_frame, hide_index=True, width="stretch")
     if st.button("Refresh status"):
         st.rerun()
 

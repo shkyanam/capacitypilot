@@ -90,15 +90,17 @@ def test_create_local_reservation_is_audited_and_derives_tenancy(monkeypatch):
             return Cursor(None)
         if "from capacity_planner.capacity_inventory" in sql:
             return Cursor(
-                {
+                [
+                    {
                     "inventory_id": 10,
+                    "qfab": "QFAB-01",
                     "inventory_usable": True,
                     "usable_capacity_tib": 1000,
                     "allocated_capacity_tib": 500,
-                }
+                    "planning_hold_tib": 0,
+                    }
+                ]
             )
-        if sql.startswith("select coalesce(sum(requested_tib),0)"):
-            return Cursor({"planning_hold_tib": 0})
         if sql.startswith("insert into capacity_planner.local_capacity_reservation"):
             return Cursor(created)
         if sql.startswith("insert into capacity_planner.planner_decision"):
@@ -243,7 +245,7 @@ def test_capacity_availability_subtracts_allocations_and_planning_holds(monkeypa
     assert float(result["available_after_tib"]) == 150
     assert float(result["post_reservation_allocation_pct"]) == 85
     assert result["capacity_sufficient"] is True
-    assert result["infrastructure_order_required"] is True
+    assert result["infrastructure_order_required"] is False
 
 
 def test_reservation_rejects_shortfall_before_insert(monkeypatch):
@@ -263,15 +265,17 @@ def test_reservation_rejects_shortfall_before_insert(monkeypatch):
             return Cursor(None)
         if "from capacity_planner.capacity_inventory" in sql:
             return Cursor(
-                {
+                [
+                    {
                     "inventory_id": 10,
+                    "qfab": "QFAB-01",
                     "inventory_usable": True,
                     "usable_capacity_tib": 1000,
                     "allocated_capacity_tib": 900,
-                }
+                    "planning_hold_tib": 0,
+                    }
+                ]
             )
-        if sql.startswith("select coalesce(sum(requested_tib),0)"):
-            return Cursor({"planning_hold_tib": 0})
         raise AssertionError("Insufficient capacity must not create a reservation")
 
     fake = FakeConnection(responder)

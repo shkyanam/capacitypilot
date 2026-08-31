@@ -10,7 +10,7 @@ def test_news_worker_finishes_successful_job(monkeypatch):
     monkeypatch.setattr(
         news_worker,
         "collect_news",
-        lambda _company_id: {"status": "AVAILABLE", "items": [{"title": "evidence"}]},
+        lambda _company_id, **_kwargs: {"status": "AVAILABLE", "items": [{"title": "evidence"}]},
     )
     monkeypatch.setattr(news_worker, "finish_job", lambda *args: finished.append(args))
     assert news_worker.run_once("worker") is True
@@ -25,7 +25,7 @@ def test_news_worker_retries_failed_job(monkeypatch):
     monkeypatch.setattr(
         news_worker,
         "collect_news",
-        lambda _company_id: (_ for _ in ()).throw(TimeoutError("slow")),
+        lambda _company_id, **_kwargs: (_ for _ in ()).throw(TimeoutError("slow")),
     )
     monkeypatch.setattr(news_worker, "fail_job", lambda *args: failed.append(args))
     assert news_worker.run_once("worker") is True

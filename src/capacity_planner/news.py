@@ -13,6 +13,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from .config import get_settings
 from .db import connection
+from .semantic_news import retrieve as retrieve_semantic_passages
 
 SIGNALS = {
     "acquisition": ("acquisition", "acquire", "merger", "business combination"),
@@ -39,6 +40,76 @@ def extract_excerpt(text: str, limit: int = 700) -> str:
     positions = [position for position in positions if position >= 0]
     start = max(0, min(positions) - 180) if positions else 0
     return cleaned[start : start + limit]
+
+
+def _semantic_classification(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Classify only retrieved passages; malformed or unavailable output is ignored."""
+    settings = get_settings()
+    if not candidates or not settings.nebius_api_key:
+        return []
+    prompt = {
+        "task": "Identify capacity-planning signals in the supplied filing passages only.",
+        "allowed_categories": sorted(SIGNALS),
+        "rules": [
+            "Return JSON only: {\"matches\":[{\"chunk_id\":integer,\"categories\":[string],\"reason\":string}]}",
+            "Include a match only when its supplied passage supports the category.",
+            "Do not infer facts outside the supplied passages.",
+            "categories must be selected only from allowed_categories.",
+        ],
+        "passages": [{"chunk_id": item["chunk_id"], "text": item["excerpt"]} for item in candidates],
+    }
+    try:
+        response = httpx.post(
+            f"{settings.nebius_base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {settings.nebius_api_key}"},
+            json={
+                "model": settings.nebius_chat_model,
+                "temperature": 0,
+                "max_tokens": 400,
+                "messages": [
+                    {"role": "system", "content": "You are a cautious evidence classifier."},
+                    {"role": "user", "content": json.dumps(prompt)},
+                ],
+            },
+            timeout=45,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"].strip()
+        if content.startswith("```"):
+            content = content.split("\n", 1)[1].rsplit("```", 1)[0]
+        payload = json.loads(content)
+    except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return []
+    allowed_ids = {item["chunk_id"] for item in candidates}
+    matches = []
+    for item in payload.get("matches", []):
+        if not isinstance(item, dict) or item.get("chunk_id") not in allowed_ids:
+            continue
+        categories = sorted({category for category in item.get("categories", []) if category in SIGNALS})
+        if categories:
+            matches.append(
+                {
+                    "chunk_id": item["chunk_id"],
+                    "categories": categories,
+                    "reason": str(item.get("reason", ""))[:500],
+                }
+            )
+    return matches
+
+
+def _semantic_evidence(text: str) -> tuple[list[dict[str, Any]], str | None]:
+    """Retrieve and classify cited passages without failing core SEC ingestion."""
+    try:
+        candidates = retrieve_semantic_passages(text)
+        classifications = _semantic_classification(candidates)
+    except (httpx.HTTPError, ValueError, RuntimeError) as exc:
+        return [], f"{type(exc).__name__}: {exc}"[:500]
+    candidate_by_id = {item["chunk_id"]: item for item in candidates}
+    return [
+        {**candidate_by_id[item["chunk_id"]], **item}
+        for item in classifications
+        if item["chunk_id"] in candidate_by_id
+    ], None
 
 
 @retry(
@@ -110,9 +181,18 @@ def _sec_evidence(company: dict[str, Any]) -> list[dict[str, Any]]:
             f"https://www.sec.gov/Archives/edgar/data/{company['sec_cik']}/"
             f"{accession_compact}/{document}"
         )
-        text = BeautifulSoup(_sec_get_text(url, headers), "html.parser").get_text(" ", strip=True)
+        text = BeautifulSoup(_sec_get_text(url, headers), "html.parser").get_text("\n", strip=True)
         excerpt = extract_excerpt(text)
         categories, relevance = classify(excerpt)
+        semantic_matches, semantic_error = _semantic_evidence(text)
+        semantic_categories = {
+            category for match in semantic_matches for category in match["categories"]
+        }
+        categories = sorted(set(categories) | semantic_categories)
+        if semantic_matches:
+            excerpts = [excerpt, *[match["excerpt"][:700] for match in semantic_matches]]
+            excerpt = "\n\n--- Semantic passage ---\n\n".join(dict.fromkeys(excerpts))[:2800]
+            relevance = max(relevance, min(1.0, round(0.2 + 0.2 * len(categories), 2)))
         evidence.append(
             {
                 "provider": "SEC_EDGAR",
@@ -124,7 +204,22 @@ def _sec_evidence(company: dict[str, Any]) -> list[dict[str, Any]]:
                 "excerpt": excerpt,
                 "categories": categories,
                 "relevance_score": relevance,
-                "metadata": {"form": row["form"], "accession_number": accession},
+                "metadata": {
+                    "form": row["form"],
+                    "accession_number": accession,
+                    "semantic_retrieval": {
+                        "matches": [
+                            {
+                                "chunk_id": match["chunk_id"],
+                                "semantic_score": match["semantic_score"],
+                                "categories": match["categories"],
+                                "reason": match["reason"],
+                            }
+                            for match in semantic_matches
+                        ],
+                        "error": semantic_error,
+                    },
+                },
             }
         )
     return evidence
@@ -222,9 +317,9 @@ def _cached(company_id: int) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def collect_news(company_id: int) -> dict[str, Any]:
+def collect_news(company_id: int, *, refresh: bool = False) -> dict[str, Any]:
     lookback_days = get_settings().news_lookback_days
-    cached = _cached(company_id)
+    cached = [] if refresh else _cached(company_id)
     if cached:
         return {
             "status": "AVAILABLE",

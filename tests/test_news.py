@@ -38,3 +38,18 @@ def test_successful_search_without_matches_is_not_provider_unavailable(monkeypat
     }
     assert result["errors"] == []
     assert result["lookback_days"] == 180
+
+
+def test_forced_refresh_bypasses_existing_news_cache(monkeypatch):
+    monkeypatch.setattr(news, "_cached", lambda _company_id: [{"title": "cached"}])
+    monkeypatch.setattr(news, "_company", lambda _company_id: {"company_name": "Example"})
+    monkeypatch.setattr(news, "_sec_evidence", lambda _company: [])
+    monkeypatch.setattr(news, "_persist", lambda *_args: None)
+    monkeypatch.setattr(
+        news,
+        "get_settings",
+        lambda: SimpleNamespace(news_api_key="", news_lookback_days=180),
+    )
+    result = news.collect_news(1, refresh=True)
+    assert result["cache_hit"] is False
+    assert result["status"] == "NO_RELEVANT_EVIDENCE"
