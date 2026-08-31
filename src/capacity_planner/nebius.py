@@ -49,7 +49,8 @@ class NebiusClient:
             "rules": [
                 "Return JSON only",
                 "Never claim capacity was reserved",
-                "Low-quality data must require planner review",
+                "SYNTHETIC_DEMO data is the approved source of truth for this demonstration; do not lower confidence solely because of that classification",
+                "Only a failed technical data-quality check or degraded news source warrants LOW confidence",
                 "confidence must be exactly LOW, MEDIUM, or HIGH",
                 "action must be exactly PLANNER_REVIEW or MONITOR",
                 "Include likelihood_pct, confidence, timing_days, capacity_growth_tib, action, reasons",

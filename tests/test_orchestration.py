@@ -69,6 +69,16 @@ class FakeMediumNebius:
         }
 
 
+class FakeLowNebius:
+    def recommendation(self, _evidence):
+        return {
+            "likelihood_pct": 80,
+            "confidence": "LOW",
+            "action": "PLANNER_REVIEW",
+            "reasons": ["cautious model response"],
+        }
+
+
 def recommendation_state(*, quality_passed=True, news_status="AVAILABLE"):
     return {
         "case_id": "case-1",
@@ -116,6 +126,20 @@ def test_high_quality_medium_confidence_case_can_enable_alert(monkeypatch):
     assert result["confidence"] == "MEDIUM"
     assert result["alert_allowed"] is True
     assert result["requires_human_approval"] is True
+
+
+def test_healthy_demo_evidence_has_a_medium_confidence_floor(monkeypatch):
+    monkeypatch.setattr(agents, "NebiusClient", FakeLowNebius)
+    monkeypatch.setattr(agents, "event", lambda *_args: None)
+    current = recommendation_state()
+    current["evidence"]["data_quality"] = {
+        "passed": False,
+        "technical_quality_passed": True,
+        "production_eligible": False,
+    }
+    result = agents.recommend(current)["recommendation"]
+    assert result["confidence"] == "MEDIUM"
+    assert result["alert_allowed"] is True
 
 
 def test_medium_confidence_still_cannot_bypass_failed_quality(monkeypatch):

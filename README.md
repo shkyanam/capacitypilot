@@ -30,6 +30,10 @@ If Mem0 is unavailable, the PostgreSQL decision still commits, the outbox retrie
 
 The first 100 company identities (name, SEC CIK, ticker, exchange) are downloaded from the official SEC EDGAR company-ticker dataset. Storage, utilization, expansion, and demand values are deterministic **synthetic demonstration data**, because customer operational capacity data is not public. Every row carries `data_classification = SYNTHETIC_DEMO`.
 
+For the local demonstration, this supplied dataset is the planning source of truth: the synthetic
+classification is disclosed in the UI but does not lower recommendation confidence. LOW confidence
+is reserved for a failed technical data-quality check or a degraded news source.
+
 ## Production news evidence
 
 The News Agent retrieves recent authoritative SEC filings for the selected company, extracts short signal-focused passages, classifies acquisitions, growth plans, data-center activity, capacity investments, and geographic expansion, and stores the citation and audit metadata in `capacity_planner.news_evidence`. Results are cached for 24 hours and deduplicated by provider identity and URL.
