@@ -36,14 +36,21 @@ def run_once(worker_id: str) -> bool:
 
 def main() -> None:
     migrate()
-    if not get_settings().jira_enabled:
-        raise RuntimeError("Set JIRA_ENABLED=true before starting the Jira worker")
+    settings = get_settings()
     worker_id = f"jira-{socket.gethostname()}-{os.getpid()}"
+    if not settings.jira_enabled:
+        LOG.info("jira_worker_disabled worker_id=%s", worker_id)
+        try:
+            while True:
+                time.sleep(settings.worker_poll_seconds)
+        except KeyboardInterrupt:
+            LOG.info("jira_worker_stopped worker_id=%s", worker_id)
+        return
     LOG.info("jira_worker_ready worker_id=%s", worker_id)
     try:
         while True:
             if not run_once(worker_id):
-                time.sleep(get_settings().worker_poll_seconds)
+                time.sleep(settings.worker_poll_seconds)
     except KeyboardInterrupt:
         LOG.info("jira_worker_stopped worker_id=%s", worker_id)
 

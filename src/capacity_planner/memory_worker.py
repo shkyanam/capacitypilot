@@ -29,9 +29,15 @@ def run_once(worker_id: str) -> bool:
 def main() -> None:
     migrate()
     settings = get_settings()
-    if not settings.mem0_enabled:
-        raise RuntimeError("Set MEM0_ENABLED=true before starting the memory worker")
     worker_id = f"memory-{socket.gethostname()}-{os.getpid()}"
+    if not settings.mem0_enabled:
+        LOG.info("memory_worker_disabled worker_id=%s", worker_id)
+        try:
+            while True:
+                time.sleep(settings.worker_poll_seconds)
+        except KeyboardInterrupt:
+            LOG.info("memory_worker_stopped worker_id=%s", worker_id)
+        return
     LOG.info("memory_worker_ready worker_id=%s", worker_id)
     try:
         while True:

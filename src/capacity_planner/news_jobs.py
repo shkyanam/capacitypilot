@@ -24,32 +24,33 @@ def enqueue_all() -> int:
     return cursor.rowcount
 
 
-def enqueue_limited(limit: int, *, force: bool = False) -> tuple[int, str]:
-    """Snapshot a bounded baseline and queue it; force never interrupts an active lease."""
+def enqueue_limited(limit: int, *, force: bool = False) -> tuple[int, str | None]:
+    """Queue a bounded set; forced reruns snapshot evidence and never interrupt a lease."""
     if limit < 1:
         raise ValueError("limit must be positive")
     settings = get_settings()
-    run_id = str(uuid4())
+    run_id = str(uuid4()) if force else None
     with connection() as conn:
-        conn.execute(
-            """insert into capacity_planner.news_semantic_comparison_run(run_id,customer_limit)
-               values (%s,%s)""",
-            (run_id, limit),
-        )
-        conn.execute(
-            """with selected_companies as (
-                   select company_id from capacity_planner.company order by company_id limit %s
-               )
-               insert into capacity_planner.news_evidence_baseline(
-                 run_id,company_id,provider,external_id,title,source_url,excerpt,categories,
-                 relevance_score,metadata)
-               select %s,e.company_id,e.provider,e.external_id,e.title,e.source_url,e.excerpt,
-                 e.categories,e.relevance_score,e.metadata
-               from capacity_planner.news_evidence e
-               join selected_companies s on s.company_id=e.company_id
-               on conflict(run_id,company_id,provider,external_id) do nothing""",
-            (limit, run_id),
-        )
+        if force:
+            conn.execute(
+                """insert into capacity_planner.news_semantic_comparison_run(run_id,customer_limit)
+                   values (%s,%s)""",
+                (run_id, limit),
+            )
+            conn.execute(
+                """with selected_companies as (
+                       select company_id from capacity_planner.company order by company_id limit %s
+                   )
+                   insert into capacity_planner.news_evidence_baseline(
+                     run_id,company_id,provider,external_id,title,source_url,excerpt,categories,
+                     relevance_score,metadata)
+                   select %s,e.company_id,e.provider,e.external_id,e.title,e.source_url,e.excerpt,
+                     e.categories,e.relevance_score,e.metadata
+                   from capacity_planner.news_evidence e
+                   join selected_companies s on s.company_id=e.company_id
+                   on conflict(run_id,company_id,provider,external_id) do nothing""",
+                (limit, run_id),
+            )
         cursor = conn.execute(
             """with selected_companies as (
                    select company_id from capacity_planner.company order by company_id limit %s
@@ -234,10 +235,8 @@ def enqueue_main() -> None:
     )
     args = parser.parse_args()
     queued, run_id = enqueue_limited(args.limit, force=args.force)
-    print(
-        f"Queued or refreshed {queued} of the first {args.limit} customer news-ingestion jobs "
-        f"(comparison run {run_id})"
-    )
+    comparison = f" (comparison run {run_id})" if run_id else ""
+    print(f"Queued or refreshed {queued} of the first {args.limit} customer news-ingestion jobs{comparison}")
 
 
 if __name__ == "__main__":

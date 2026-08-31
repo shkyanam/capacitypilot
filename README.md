@@ -21,11 +21,8 @@ MEM0_API_KEY=your-key
 MEM0_AGENT_ID=capacity-planner
 ```
 
-Then run the durable synchronization worker in a fourth terminal:
-
-```bash
-uv run capacity-memory-worker
-```
+Restart the unified application command after changing this setting. Its Mem0 worker then
+processes the durable synchronization outbox automatically.
 
 If Mem0 is unavailable, the PostgreSQL decision still commits, the outbox retries, and investigations continue with memory marked `DEGRADED`.
 
@@ -45,8 +42,9 @@ Keyword matching remains the default high-precision parser. When `NEBIUS_EMBEDDI
 configured, the application uses the existing Nebius API key and base URL to chunk each SEC
 filing and retrieve up to three semantically relevant passages. The configured Nebius chat model
 classifies only those retrieved passages using the fixed signal taxonomy. Source citations,
-similarity scores, and any semantic-service error are retained with the SEC evidence. Semantic
-matches are advisory: they do not bypass data-quality, alert, or planner-approval controls.
+similarity scores, match status, and any semantic-service error are retained with the SEC
+evidence. Semantic matches are advisory: they do not bypass data-quality, alert, or
+planner-approval controls.
 
 ## Local setup
 
@@ -66,40 +64,31 @@ uv run capacity-prune-demo --keep 100 --confirm-prune
 
 The command refuses to remove a customer with an active news or capacity investigation job.
 
-Run these in three terminals:
-
-```bash
-uv run capacity-api
-uv run capacity-worker
-uv run streamlit run src/capacity_planner/ui.py
-```
-
-Or start the same local stack with one command:
+Start the complete local application with one command:
 
 ```bash
 uv run capacity-start
 ```
 
-This starts the API, Streamlit, and the capacity worker. It also starts the Jira, Slack,
-and Mem0 workers when their corresponding `*_ENABLED` setting is `true`. Press `Ctrl-C`
-to stop every service started by the command.
+This runs schema migrations, queues the first 100 customers for normal news ingestion, and starts
+the API, Streamlit, Capacity, News, Jira, Slack, and Mem0 workers under one foreground supervisor.
+No worker needs a separate terminal. Jira, Slack, and Mem0 workers remain safely idle until their
+respective `*_ENABLED` setting and credentials are configured; they do not call external services
+while disabled. Press `Ctrl-C` to stop every service started by the command. Open
+http://localhost:8501 once the startup line is displayed.
 
 ## Bulk news ingestion
 
-Set `SEC_USER_AGENT` to your organization and a monitored contact email; placeholder identities are rejected. Then enqueue all companies and run the separate rate-limited worker:
+Set `SEC_USER_AGENT` to your organization and a monitored contact email; placeholder identities are rejected. The News Worker starts automatically with `uv run capacity-start`.
 
-```bash
-uv run capacity-news-enqueue --limit 100
-uv run capacity-news-worker
-```
+To deliberately compare keyword-only and semantic evidence before the normal refresh window
+expires, use `uv run capacity-news-enqueue --limit 100 --force`. The command snapshots existing
+evidence first, bypasses the ordinary evidence cache for that comparison run, and never resets a
+`RUNNING` news job. **System health** displays the resulting comparison, including customer names
+read from PostgreSQL, keyword-only versus hybrid categories/excerpts, semantic match status, and
+semantic evaluation/match counts.
 
-To deliberately reprocess the first 100 customers before the normal refresh window expires,
-use `uv run capacity-news-enqueue --limit 100 --force`. The command snapshots the existing
-keyword-only evidence first, then never resets a `RUNNING` news job. **System health** displays
-the resulting comparison, including customer names read from PostgreSQL, keyword-only versus
-hybrid categories/excerpts, and cited semantic matches.
-
-The worker processes one company at a time, uses PostgreSQL `SKIP LOCKED`, retries transient failures, recovers stale jobs, caches evidence, and refreshes completed companies after 24 hours. Progress is visible in Streamlit under **Bulk news ingestion**.
+The worker processes one company at a time, uses PostgreSQL `SKIP LOCKED`, retries transient failures, recovers stale jobs, caches evidence, and refreshes completed companies after 24 hours. Progress is visible in Streamlit under **System health → News evidence ingestion**.
 
 Open http://localhost:8501. API documentation is at http://localhost:8000/docs.
 
@@ -107,7 +96,7 @@ Open http://localhost:8501. API documentation is at http://localhost:8000/docs.
 
 FastAPI queues each company exactly once for its initial portfolio investigation when the backend starts. PostgreSQL makes this idempotent, and the separate capacity worker processes the durable queue. Streamlit only displays progress and results; it does not orchestrate the agent. The dashboard displays completed, remaining, and active counts plus the last successful investigation date and time. No daily schedule is created.
 
-After the baseline, planners can use **Customer investigation** to rerun any individual customer on demand.
+After the baseline, planners can use **Customer investigation** to rerun any individual customer on demand. The **Planner review** inbox displays the top 10 non-simulation recommendations, ranked by likelihood.
 Ad hoc planner reruns use priority `10`; one-time portfolio baseline cases use priority `100`.
 Workers therefore claim planner-requested investigations before remaining baseline work while
 retaining FIFO order within each priority.
@@ -120,7 +109,7 @@ The shortlist supports bulk editing of likelihood, confidence, timing, capacity 
 
 Each customer has a capacity region. The **Regional capacity** page shows usable, physically allocated, locally held, and available capacity across region, QFAB, storage tier, and capacity-model pools.
 
-From **Review queue**, select a customer and complete **Create local reservation**. The application derives the customer region, lets the planner select a compatible QFAB/service/vault pool, and displays capacity before and after the request. Reservation is disabled when inventory is missing, stale, or insufficient. The PostgreSQL transaction locks and rechecks the pool before inserting, so concurrent planners cannot over-reserve it.
+From **Review queue**, select a customer and complete **Create local reservation**. The application derives the customer region, lets the planner select a compatible QFAB/service/vault reference, and displays the requested TiB against total fresh capacity available in that region. Reservation is disabled when regional inventory is missing, stale, or insufficient. The PostgreSQL transaction locks and rechecks all compatible regional pools before inserting, so concurrent planners cannot over-reserve the regional supply.
 
 A successful submission creates one idempotent `LOCAL_RESERVED` row per investigation in `capacity_planner.local_capacity_reservation`, stores the regional availability snapshot, records an `APPROVE_REVIEW` decision, writes a case audit event, and queues the derived Mem0 decision when memory is enabled. A reservation is allowed when the requested TiB does not exceed the total fresh available capacity in the customer's region; a shortage blocks reservation and reports the TiB shortfall. When Jira is enabled, the approval automatically queues a `CAP_RESERVATION` request. Jira delivery remains asynchronous and retryable, so Jira downtime does not roll back the committed reservation.
 
@@ -128,7 +117,7 @@ After approval, the customer leaves the unresolved review inbox and the first St
 
 The default Streamlit screen and Slack use the same action-inbox contract: unresolved, `alert_allowed=true`, at least 80% likelihood, MEDIUM/HIGH confidence, positive estimated growth, and no prior planner decision or local reservation. Both route an item to **Reserve available capacity** when total fresh capacity in the customer's region can absorb the estimated growth, or **Order more storage** otherwise. The selected service, vault, and QFAB are retained as reservation metadata.
 
-Use **Quality & evals** in CapacityPilot to inspect persisted Data Quality Agent results for all 16 checks, recent per-customer failures, specialist evidence coverage, labeled-outcome precision against the 80% target, case status distribution, specialist execution counts, retries, and recent terminal orchestration failures.
+Use **Quality & evals** in CapacityPilot to inspect persisted Data Quality Agent results for all 16 checks, recent per-customer failures, specialist evidence coverage, labeled-outcome precision against the 80% target, case status distribution, specialist execution counts, retries, and recent terminal orchestration failures. In the local demo, technical checks can pass while `production_data_only` fails because storage history and demand are synthetic; the UI labels this clearly as synthetic demonstration data.
 
 The **Evaluation results** tab includes an explicit production benchmark scorecard. It reports
 the measured percentage, benchmark, sample size, and PASS/FAIL/NOT EVALUATED status for API
@@ -146,17 +135,15 @@ Jira creation follows the explicit planner approval in Streamlit:
 - Insufficient regional capacity: reservation is blocked and an infrastructure-order ticket can be created in the `HUB` project.
 - Regional supply planning: use **Create regional HUB request** on the Streamlit home page to order infrastructure for a verified region/QFAB/storage-tier pool without attaching a customer. The planner must supply an order quantity, required date, identity, justification, and explicit confirmation. Active duplicate orders for the same pool are suppressed.
 
-Requests first enter the PostgreSQL `capacity_planner.jira_request` outbox. A separate worker creates the Jira issue with an idempotency label and retries transient failures:
-
-```bash
-uv run capacity-jira-worker
-```
+Requests first enter the PostgreSQL `capacity_planner.jira_request` outbox. The Jira worker,
+managed by `uv run capacity-start`, creates the Jira issue with an idempotency label and retries
+transient failures.
 
 Configure the `JIRA_*` variables shown in `.env.example`. Keep the API token only in `.env`; never commit it.
 
 ## Slack capacity alerts
 
-The Slack digest reports three live counts: demand signals awaiting review, cases that may fit in current regional supply (**Reserve capacity**), and cases whose estimated growth exceeds every fresh regional pool (**Order more storage**). Slack contains a link to Streamlit and never performs the decision itself. The reservation transaction revalidates the exact service, vault, and QFAB selection.
+The Slack digest reports three live counts: demand signals awaiting review, cases that may fit in current regional supply (**Reserve capacity**), and cases whose estimated growth exceeds total fresh regional capacity (**Order more storage**). Slack contains a link to Streamlit and never performs the decision itself. The reservation transaction revalidates regional availability before committing a hold.
 
 Alerts use the data available in PostgreSQL and require an orchestrator recommendation with `alert_allowed=true`. MEDIUM- and HIGH-confidence recommendations at 80% likelihood or above may alert; failed technical-quality checks, degraded news, and LOW confidence remain suppressed. `SLACK_REQUIRE_PRODUCTION_ELIGIBLE` can optionally add a separate source-classification gate; it is disabled by default.
 
@@ -165,13 +152,10 @@ Use either an incoming webhook or a bot token:
 - Webhook: `SLACK_AUTH_MODE=webhook` and `SLACK_WEBHOOK_URL=...`
 - Bot: `SLACK_AUTH_MODE=bot`, `SLACK_BOT_TOKEN=...`, and `SLACK_CHANNEL_ID=...` (requires Slack `chat:write` scope)
 
-Then start the autonomous digest/outbox worker:
-
-```bash
-uv run capacity-slack-worker
-```
-
-It sends only when the eligible snapshot changes and observes `SLACK_DIGEST_INTERVAL_MINUTES`; delivery failures retry with backoff. The **Slack alerts** Streamlit page shows the current categorization, delivery history, and an explicitly confirmed ad hoc send option. Keep all Slack secrets only in `.env`.
+The Slack digest/outbox worker is managed by `uv run capacity-start`. It sends only when the
+eligible snapshot changes and observes `SLACK_DIGEST_INTERVAL_MINUTES`; delivery failures retry
+with backoff. The **Slack alerts** Streamlit page shows the current categorization, delivery
+history, and an explicitly confirmed ad hoc send option. Keep all Slack secrets only in `.env`.
 
 Use **Local reservations** in the sidebar to review the complete local register. These records are internal planning holds; they do not represent physical storage provisioning or external Capacity Manager allocations.
 

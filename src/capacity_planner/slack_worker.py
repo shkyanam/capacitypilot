@@ -34,14 +34,21 @@ def run_once(worker_id: str) -> bool:
 
 def main() -> None:
     migrate()
-    if not get_settings().slack_enabled:
-        raise RuntimeError("Set SLACK_ENABLED=true before starting the Slack worker")
+    settings = get_settings()
     worker_id = f"slack-{socket.gethostname()}-{os.getpid()}"
+    if not settings.slack_enabled:
+        LOG.info("slack_worker_disabled worker_id=%s", worker_id)
+        try:
+            while True:
+                time.sleep(settings.worker_poll_seconds)
+        except KeyboardInterrupt:
+            LOG.info("slack_worker_stopped worker_id=%s", worker_id)
+        return
     LOG.info("slack_worker_ready worker_id=%s", worker_id)
     try:
         while True:
             if not run_once(worker_id):
-                time.sleep(get_settings().worker_poll_seconds)
+                time.sleep(settings.worker_poll_seconds)
     except KeyboardInterrupt:
         LOG.info("slack_worker_stopped worker_id=%s", worker_id)
 
