@@ -31,8 +31,11 @@ If Mem0 is unavailable, the PostgreSQL decision still commits, the outbox retrie
 The first 100 company identities (name, SEC CIK, ticker, exchange) are downloaded from the official SEC EDGAR company-ticker dataset. Storage, utilization, expansion, and demand values are deterministic **synthetic demonstration data**, because customer operational capacity data is not public. Every row carries `data_classification = SYNTHETIC_DEMO`.
 
 For the local demonstration, this supplied dataset is the planning source of truth: the synthetic
-classification is disclosed in the UI but does not lower recommendation confidence. LOW confidence
-is reserved for a failed technical data-quality check or a degraded news source.
+classification is disclosed in the UI but does not lower recommendation confidence. The
+Recommendation Agent assigns HIGH confidence when multiple independent planning signals
+corroborate need (utilization, recent growth, open demand, and cited news); healthy but limited
+evidence is MEDIUM. LOW confidence is reserved for a failed technical data-quality check or a
+degraded news source.
 
 ## Production news evidence
 

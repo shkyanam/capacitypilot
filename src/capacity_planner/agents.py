@@ -204,6 +204,29 @@ def memory(state: AgentState) -> dict:
     return {"evidence": {**state["evidence"], "memory": result}}
 
 
+def _demo_confidence(recommendation: dict, evidence: dict) -> tuple[str, list[str]]:
+    """Make healthy demonstration confidence explainable from corroborating signals."""
+    reasons: list[str] = []
+    storage = evidence.get("storage_history", {})
+    demand_evidence = evidence.get("demand", {})
+    news_evidence = evidence.get("news", {})
+
+    if float(storage.get("utilization_pct") or 0) >= 80:
+        reasons.append("high utilization")
+    if float(storage.get("trailing_12m_growth_tib") or 0) > 0:
+        reasons.append("recent storage growth")
+    if float(demand_evidence.get("open_demand_tib") or 0) > 0:
+        reasons.append("open demand")
+    if any(item.get("categories") for item in news_evidence.get("items", [])):
+        reasons.append("cited external signal")
+
+    # The model can identify a strong pattern, while the deterministic count keeps
+    # the displayed band auditable for the supplied demonstration source of truth.
+    if recommendation.get("confidence") == "HIGH" or len(reasons) >= 2:
+        return "HIGH", reasons
+    return "MEDIUM", reasons
+
+
 def recommend(state: AgentState) -> dict:
     recommendation = NebiusClient().recommendation(state["evidence"])
     quality = state["evidence"]["data_quality"]
@@ -216,9 +239,10 @@ def recommend(state: AgentState) -> dict:
         recommendation["alert_allowed"] = False
     else:
         # The local synthetic dataset is the approved source of truth for this demo.
-        # It is disclosed in the UI but must not make otherwise healthy evidence LOW.
-        if recommendation.get("confidence") == "LOW":
-            recommendation["confidence"] = "MEDIUM"
+        # Its disclosure must not suppress the agent's evidence-based prioritisation.
+        confidence, confidence_basis = _demo_confidence(recommendation, state["evidence"])
+        recommendation["confidence"] = confidence
+        recommendation["confidence_basis"] = confidence_basis
         recommendation["alert_allowed"] = (
             recommendation.get("confidence") in {"MEDIUM", "HIGH"}
             and float(recommendation.get("likelihood_pct", 0)) >= 80

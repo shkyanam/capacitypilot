@@ -142,6 +142,25 @@ def test_healthy_demo_evidence_has_a_medium_confidence_floor(monkeypatch):
     assert result["alert_allowed"] is True
 
 
+def test_corroborated_demo_signals_raise_low_model_confidence_to_high(monkeypatch):
+    monkeypatch.setattr(agents, "NebiusClient", FakeLowNebius)
+    monkeypatch.setattr(agents, "event", lambda *_args: None)
+    current = recommendation_state()
+    current["evidence"].update(
+        {
+            "storage_history": {"utilization_pct": 90, "trailing_12m_growth_tib": 25},
+            "demand": {"open_demand_tib": 10},
+        }
+    )
+    result = agents.recommend(current)["recommendation"]
+    assert result["confidence"] == "HIGH"
+    assert result["confidence_basis"] == [
+        "high utilization",
+        "recent storage growth",
+        "open demand",
+    ]
+
+
 def test_medium_confidence_still_cannot_bypass_failed_quality(monkeypatch):
     monkeypatch.setattr(agents, "NebiusClient", FakeMediumNebius)
     monkeypatch.setattr(agents, "event", lambda *_args: None)
