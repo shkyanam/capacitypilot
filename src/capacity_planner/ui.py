@@ -692,7 +692,7 @@ def render_capacity_inventory() -> None:
     a, b, c, d = st.columns(4)
     a.metric("Usable capacity", f"{visible['usable_capacity_tib'].sum():,.1f} TiB")
     b.metric("Physically allocated", f"{visible['allocated_capacity_tib'].sum():,.1f} TiB")
-    c.metric("Planning holds", f"{visible['planning_hold_tib'].sum():,.1f} TiB")
+    c.metric("Capacity reserved", f"{visible['planning_hold_tib'].sum():,.1f} TiB")
     d.metric("Available", f"{visible['available_capacity_tib'].sum():,.1f} TiB")
     display = visible.rename(
         columns={
@@ -702,7 +702,7 @@ def render_capacity_inventory() -> None:
             "tenancy_type": "Capacity model",
             "usable_capacity_tib": "Usable TiB",
             "allocated_capacity_tib": "Allocated TiB",
-            "planning_hold_tib": "Planning holds TiB",
+            "planning_hold_tib": "Capacity reserved TiB",
             "available_capacity_tib": "Available TiB",
             "current_allocation_pct": "Allocated %",
             "freshness_status": "Freshness",
@@ -718,7 +718,7 @@ def render_capacity_inventory() -> None:
                 "Capacity model",
                 "Usable TiB",
                 "Allocated TiB",
-                "Planning holds TiB",
+                "Capacity reserved TiB",
                 "Available TiB",
                 "Allocated %",
                 "Freshness",
