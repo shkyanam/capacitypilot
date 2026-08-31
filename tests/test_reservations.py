@@ -94,6 +94,8 @@ def test_create_local_reservation_is_audited_and_derives_tenancy(monkeypatch):
                     {
                     "inventory_id": 10,
                     "qfab": "QFAB-01",
+                    "service": "Storage Capacity",
+                    "vault_type": "High Performance",
                     "inventory_usable": True,
                     "usable_capacity_tib": 1000,
                     "allocated_capacity_tib": 500,
@@ -220,6 +222,8 @@ def test_capacity_availability_subtracts_allocations_and_planning_holds(monkeypa
                     {
                         "inventory_id": 10,
                         "qfab": "QFAB-A",
+                        "service": "Storage Capacity",
+                        "vault_type": "High Performance",
                         "usable_capacity_tib": 1000,
                         "allocated_capacity_tib": 500,
                         "planning_hold_tib": 100,
@@ -248,6 +252,55 @@ def test_capacity_availability_subtracts_allocations_and_planning_holds(monkeypa
     assert result["infrastructure_order_required"] is False
 
 
+def test_capacity_availability_uses_total_fresh_regional_supply(monkeypatch):
+    results = iter(
+        [
+            Cursor({"company_id": 7, "region": "us-ashburn-1"}),
+            Cursor(
+                [
+                    {
+                        "inventory_id": 10,
+                        "qfab": "QFAB-A",
+                        "service": "Storage Capacity",
+                        "vault_type": "High Performance",
+                        "usable_capacity_tib": 1000,
+                        "allocated_capacity_tib": 1000,
+                        "planning_hold_tib": 0,
+                        "available_capacity_tib": 0,
+                        "inventory_usable": True,
+                    },
+                    {
+                        "inventory_id": 11,
+                        "qfab": "QFAB-B",
+                        "service": "Storage Capacity",
+                        "vault_type": "Standard",
+                        "usable_capacity_tib": 12_000,
+                        "allocated_capacity_tib": 395,
+                        "planning_hold_tib": 0,
+                        "available_capacity_tib": 11_605,
+                        "inventory_usable": True,
+                    },
+                ]
+            ),
+        ]
+    )
+    fake = FakeConnection(lambda _sql, _params: next(results))
+    patch_connection(monkeypatch, repository, fake)
+    monkeypatch.setattr(
+        repository,
+        "get_settings",
+        lambda: SimpleNamespace(capacity_inventory_max_age_hours=24),
+    )
+
+    result = repository.capacity_availability(
+        request_payload()["case_id"], "Storage Capacity", "High Performance", 397.9
+    )[0]
+
+    assert float(result["regional_available_tib"]) == 11_605
+    assert result["capacity_sufficient"] is True
+    assert float(result["shortfall_tib"]) == 0
+
+
 def test_reservation_rejects_shortfall_before_insert(monkeypatch):
     def responder(sql, _params):
         if "pg_advisory_xact_lock" in sql:
@@ -269,6 +322,8 @@ def test_reservation_rejects_shortfall_before_insert(monkeypatch):
                     {
                     "inventory_id": 10,
                     "qfab": "QFAB-01",
+                    "service": "Storage Capacity",
+                    "vault_type": "High Performance",
                     "inventory_usable": True,
                     "usable_capacity_tib": 1000,
                     "allocated_capacity_tib": 900,

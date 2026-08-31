@@ -514,8 +514,10 @@ def capacity_availability(
                    coalesce(h.planning_hold_tib,0),0) available_capacity_tib,
                  round(100*(i.allocated_capacity_tib+coalesce(h.planning_hold_tib,0)) /
                    i.usable_capacity_tib,2) current_allocation_pct,
-                 (i.freshness_status='FRESH' and
-                   i.source_updated_at >= now()-(%s * interval '1 hour')) inventory_usable
+                 (i.freshness_status='FRESH' and (
+                   i.data_classification='SYNTHETIC_DEMO' or
+                   i.source_updated_at >= now()-(%s * interval '1 hour')
+                 )) inventory_usable
                from capacity_planner.capacity_inventory i
                left join lateral (
                  select sum(r.requested_tib) planning_hold_tib
@@ -523,16 +525,17 @@ def capacity_availability(
                  where r.status='LOCAL_RESERVED' and r.region=i.region and r.qfab=i.qfab
                    and r.service=i.service and r.vault_type=i.vault_type
                ) h on true
-               where i.region=%s and i.service=%s and i.vault_type=%s
+               where i.region=%s
                order by available_capacity_tib desc,i.qfab""",
             (
                 get_settings().capacity_inventory_max_age_hours,
                 case["region"],
-                service,
-                vault_type,
             ),
         ).fetchall()
     request = Decimal(str(requested_tib))
+    compatible_rows = [
+        row for row in rows if row["service"] == service and row["vault_type"] == vault_type
+    ]
     fresh_rows = [row for row in rows if row["inventory_usable"]]
     regional_available = sum(
         (Decimal(row["available_capacity_tib"]) for row in fresh_rows), Decimal(0)
@@ -551,7 +554,7 @@ def capacity_availability(
         else Decimal(0)
     )
     result = []
-    for row in rows:
+    for row in compatible_rows:
         item = dict(row)
         item.update(
             {
@@ -625,24 +628,33 @@ def create_local_reservation(request: dict) -> dict:
             )
         inventories = conn.execute(
             """select i.*,
-                 (freshness_status='FRESH' and
-                   source_updated_at >= now()-(%s * interval '1 hour')) inventory_usable,
+                 (freshness_status='FRESH' and (
+                   data_classification='SYNTHETIC_DEMO' or
+                   source_updated_at >= now()-(%s * interval '1 hour')
+                 )) inventory_usable,
                  coalesce((
                    select sum(r.requested_tib) from capacity_planner.local_capacity_reservation r
                    where r.status='LOCAL_RESERVED' and r.region=i.region and r.qfab=i.qfab
                      and r.service=i.service and r.vault_type=i.vault_type
                  ),0) planning_hold_tib
                from capacity_planner.capacity_inventory i
-               where region=%s and service=%s and vault_type=%s
+               where region=%s
                for update""",
             (
                 get_settings().capacity_inventory_max_age_hours,
                 case["region"],
-                request["service"],
-                request["vault_type"],
             ),
         ).fetchall()
-        inventory = next((row for row in inventories if row["qfab"] == request["qfab"]), None)
+        inventory = next(
+            (
+                row
+                for row in inventories
+                if row["qfab"] == request["qfab"]
+                and row["service"] == request["service"]
+                and row["vault_type"] == request["vault_type"]
+            ),
+            None,
+        )
         if not inventory or not inventory["inventory_usable"]:
             raise CapacityUnavailableError(
                 {
