@@ -597,11 +597,11 @@ def render_customer_recommendation(shortlist: pd.DataFrame) -> None:
     decision_note = st.text_area(
         "Disposition note", key=f"disposition_note_{selected_case}"
     )
-    monitor, investigate = st.columns(2)
+    monitor, reject = st.columns(2)
     decision = None
     if monitor.button("Monitor", width="stretch"):
         decision = "MONITOR"
-    if investigate.button("Investigate", width="stretch"):
+    if reject.button("Reject recommendation", width="stretch"):
         decision = "REJECT_INVESTIGATE"
     if decision:
         if len(decision_planner.strip()) < 2:
