@@ -127,6 +127,29 @@ def test_initial_portfolio_enqueue_is_idempotent_when_nothing_is_eligible(monkey
     assert repository.enqueue_initial_portfolio() == 0
 
 
+def test_portfolio_refresh_queues_completed_customers_but_skips_active_ones(monkeypatch):
+    companies = [{"company_id": 8}, {"company_id": 9}]
+
+    def responder(sql, params):
+        if "pg_advisory_xact_lock" in sql:
+            return Cursor()
+        if sql.startswith("select company_id from capacity_planner.company"):
+            return Cursor(companies)
+        if "status in ('QUEUED','RUNNING','RETRY')" in sql:
+            return Cursor({"active": 1} if params[0] == 9 else None)
+        if sql.startswith("insert into capacity_planner.case_run"):
+            return Cursor()
+        raise AssertionError(sql)
+
+    fake = FakeConnection(responder)
+    use_connection(monkeypatch, fake)
+
+    assert repository.enqueue_portfolio_refresh(100) == 1
+    insert_calls = [call for call in fake.calls if call[0].startswith("insert into")]
+    assert len(insert_calls) == 1
+    assert insert_calls[0][1][1] == 8
+
+
 def test_portfolio_status_includes_last_refresh_and_progress(monkeypatch):
     refreshed = "2026-08-30T12:00:00+05:30"
     results = iter(

@@ -110,6 +110,15 @@ Ad hoc planner reruns use priority `10`; one-time portfolio baseline cases use p
 Workers therefore claim planner-requested investigations before remaining baseline work while
 retaining FIFO order within each priority.
 
+To deliberately refresh the first 100 completed customers after a policy or model update, while
+leaving historical cases intact and skipping any active investigation, run:
+
+```bash
+uv run capacity-refresh-portfolio --limit 100
+```
+
+The Capacity worker managed by `uv run capacity-start` processes the resulting queue.
+
 ## Audited planner forecast overrides
 
 The shortlist supports bulk editing of likelihood, confidence, timing, capacity growth, and action. Customer identity, calculated quality, and production eligibility are read-only. Saving requires a planner identity and creates append-only rows in `capacity_planner.planner_forecast_override` plus case audit events. The original AI recommendation is never overwritten.

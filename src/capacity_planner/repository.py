@@ -1,3 +1,4 @@
+import argparse
 import json
 import uuid
 from decimal import Decimal
@@ -71,6 +72,45 @@ def enqueue_initial_portfolio() -> int:
                 (uuid.uuid4(), row["company_id"]),
             )
     return len(company_rows)
+
+
+def enqueue_portfolio_refresh(limit: int = 100) -> int:
+    """Queue fresh, non-overlapping investigations for a bounded portfolio refresh."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    queued = 0
+    with connection() as conn:
+        conn.execute("select pg_advisory_xact_lock(%s)", (PORTFOLIO_QUEUE_LOCK_ID,))
+        company_rows = conn.execute(
+            """select company_id from capacity_planner.company order by company_id limit %s""",
+            (limit,),
+        ).fetchall()
+        for row in company_rows:
+            company_id = row["company_id"]
+            active = conn.execute(
+                """select 1 from capacity_planner.case_run
+                   where company_id=%s and status in ('QUEUED','RUNNING','RETRY')
+                   limit 1""",
+                (company_id,),
+            ).fetchone()
+            if active:
+                continue
+            conn.execute(
+                """insert into capacity_planner.case_run(case_id,company_id,status,priority)
+                   values (%s,%s,'QUEUED',10)""",
+                (uuid.uuid4(), company_id),
+            )
+            queued += 1
+    return queued
+
+
+def refresh_portfolio_main() -> None:
+    """CLI entry point for a deliberate one-time portfolio reinvestigation."""
+    parser = argparse.ArgumentParser(description="Queue fresh CapacityPilot investigations")
+    parser.add_argument("--limit", type=int, default=100, help="Customer count to refresh")
+    args = parser.parse_args()
+    queued = enqueue_portfolio_refresh(args.limit)
+    print(f"Queued {queued} of the first {args.limit} customers for fresh investigation")
 
 
 def portfolio_status() -> dict:
