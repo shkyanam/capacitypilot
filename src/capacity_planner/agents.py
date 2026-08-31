@@ -70,8 +70,18 @@ def evaluate_quality(signal: dict[str, Any], now: datetime | None = None) -> dic
         "no_duplicate_sec_cik": signal.get("duplicate_cik_count") == 1,
         "no_duplicate_ticker_on_exchange": signal.get("duplicate_ticker_exchange_count") == 1,
         "source_marked_fresh": signal.get("source_freshness") == "FRESH",
-        "snapshot_within_age_limit": age_hours is not None
-        and age_hours <= get_settings().max_signal_age_hours,
+        "snapshot_within_age_limit": generated_at is not None
+        and (
+            # The seeded demonstration baseline is intentionally static. Its FRESH
+            # source declaration is authoritative for the demo, rather than the
+            # wall-clock age of the local seed timestamp.
+            (
+                signal.get("data_classification") == "SYNTHETIC_DEMO"
+                and signal.get("source_freshness") == "FRESH"
+            )
+            or age_hours is not None
+            and age_hours <= get_settings().max_signal_age_hours
+        ),
         "timestamp_not_in_future": generated_at is not None and generated_at <= now,
         "installed_capacity_positive": installed is not None and installed > Decimal(0),
         "consumption_nonnegative": consumed is not None and consumed >= Decimal(0),

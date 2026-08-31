@@ -62,6 +62,20 @@ def test_quality_keeps_test_scenarios_out_of_production_eligibility():
     assert result["failed_checks"] == ["production_data_only"]
 
 
+def test_fresh_synthetic_demo_baseline_does_not_expire_by_wall_clock_age():
+    signal = valid_signal()
+    signal.update(
+        data_classification="SYNTHETIC_DEMO",
+        source_freshness="FRESH",
+        generated_at=datetime.now(UTC) - timedelta(days=7),
+    )
+
+    result = evaluate_quality(signal)
+
+    assert result["technical_quality_passed"] is True
+    assert result["failed_checks"] == ["production_data_only"]
+
+
 def test_quality_rejects_null_invalid_name_and_duplicates():
     signal = valid_signal()
     signal.update(

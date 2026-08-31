@@ -35,7 +35,9 @@ classification is disclosed in the UI but does not lower recommendation confiden
 Recommendation Agent assigns HIGH confidence when multiple independent planning signals
 corroborate need (utilization, recent growth, open demand, and cited news); healthy but limited
 evidence is MEDIUM. LOW confidence is reserved for a failed technical data-quality check or a
-degraded news source.
+degraded news source. The static seeded baseline treats its `FRESH` source declaration as
+authoritative for the demonstration; production data continues to use the configured freshness
+window.
 
 ## Production news evidence
 
